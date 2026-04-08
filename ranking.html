@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ranking | Hanseatische Dart Meisterschaft</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-page="ranking">
+    <div class="site-shell">
+      <header class="topbar">
+        <a class="brand" href="index.html">
+          <span class="brand-kicker">Privat. Laut. Legendär.</span>
+          <span class="brand-title">Hanseatische Dart Meisterschaft</span>
+        </a>
+        <nav class="nav">
+          <a class="nav-link" href="index.html">Landingpage</a>
+          <a class="nav-link" href="turnierbaum.html">Turnierbaum</a>
+          <a class="nav-link is-active" href="ranking.html">Ranking</a>
+        </nav>
+      </header>
+
+      <main class="page-main">
+        <section class="page-hero panel" data-reveal>
+          <div>
+            <p class="eyebrow">Hall of Flame</p>
+            <h1>Ranking, Stats und gepflegte Angeberei.</h1>
+            <p>
+              Namen und Werte direkt in die Tabelle tippen. Mit einem Klick wird
+              nach Punkten, Leg-Differenz und Average neu sortiert.
+            </p>
+            <p class="sync-status" id="syncStatus">Cloud Sync wird verbunden...</p>
+          </div>
+          <div class="toolbar toolbar-wrap">
+            <button class="button button-primary" id="addRankingRow" type="button">Spieler hinzufügen</button>
+            <button class="button button-secondary" id="importBracketPlayers" type="button">Spieler aus Turnierbaum</button>
+            <button class="button button-secondary" id="sortRanking" type="button">Neu sortieren</button>
+            <button class="button button-secondary" id="resetRanking" type="button">Demo laden</button>
+          </div>
+        </section>
+
+        <section class="panel table-panel" data-reveal>
+          <div class="table-wrap">
+            <table class="ranking-table">
+              <thead>
+                <tr>
+                  <th>Pos.</th>
+                  <th>Name</th>
+                  <th>Spiele</th>
+                  <th>Siege</th>
+                  <th>Legs +</th>
+                  <th>Legs -</th>
+                  <th>Diff</th>
+                  <th>180er</th>
+                  <th>Avg</th>
+                  <th>Punkte</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="rankingBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
