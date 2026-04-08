@@ -395,7 +395,7 @@ function normalizeBracketState(value) {
     return hydrateBracketState({
       playersText: typeof value.playersText === "string" ? value.playersText : "",
       seeding: Array.isArray(value.seeding) ? value.seeding : [],
-      rounds: Array.isArray(value.rounds) ? value.rounds : []
+      rounds: deserializeBracketRounds(value.rounds)
     });
   }
 
@@ -403,7 +403,7 @@ function normalizeBracketState(value) {
     return hydrateBracketState({
       playersText: value.players.join("\n"),
       seeding: Array.isArray(value.seeding) ? value.seeding : value.players,
-      rounds: Array.isArray(value.rounds) ? value.rounds : []
+      rounds: deserializeBracketRounds(value.rounds)
     });
   }
 
@@ -631,7 +631,7 @@ function createBracketPayload(state) {
     state: {
       playersText: normalized.playersText,
       seeding: normalized.seeding,
-      rounds: normalized.rounds
+      rounds: serializeBracketRounds(normalized.rounds)
     },
     updatedAt: new Date().toISOString()
   };
@@ -667,6 +667,34 @@ function normalizeBracketSeeding(rawSeeding, players) {
   }
 
   return shufflePlayers(players);
+}
+
+function deserializeBracketRounds(rawRounds) {
+  if (!Array.isArray(rawRounds)) {
+    return [];
+  }
+
+  return rawRounds.map((round) => {
+    const matches = Array.isArray(round)
+      ? round
+      : Array.isArray(round?.matches)
+        ? round.matches
+        : [];
+
+    return matches.map((match) => ({
+      scoreA: sanitizeScore(String(match?.scoreA || "")),
+      scoreB: sanitizeScore(String(match?.scoreB || ""))
+    }));
+  });
+}
+
+function serializeBracketRounds(rounds) {
+  return rounds.map((matches) => ({
+    matches: matches.map((match) => ({
+      scoreA: sanitizeScore(String(match?.scoreA || "")),
+      scoreB: sanitizeScore(String(match?.scoreB || ""))
+    }))
+  }));
 }
 
 function haveSamePlayers(left, right) {
