@@ -68,7 +68,7 @@ async function initBracketPage() {
 
   onSnapshot(bracketRef, async (snapshot) => {
     if (!snapshot.exists()) {
-      await setDoc(bracketRef, createBracketPayload(createEmptyBracketState()), { merge: true });
+      await writeBracketState(bracketRef, createEmptyBracketState());
       return;
     }
 
@@ -79,7 +79,7 @@ async function initBracketPage() {
     isApplyingRemote = false;
 
     if (needsBracketMigration(remoteState)) {
-      await setDoc(bracketRef, createBracketPayload(state), { merge: true });
+      await writeBracketState(bracketRef, state);
     }
 
     setSyncStatus(syncStatus, "Cloud Sync aktiv", "live");
@@ -104,7 +104,7 @@ async function initBracketPage() {
     state = reshapeBracketStateForPlayers(playersText.value, state);
     renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
     setSyncStatus(syncStatus, "Turnierbaum wird gespeichert...", "pending");
-    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
+    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus, false);
   });
 
   bracketRounds?.addEventListener("input", (event) => {
@@ -136,13 +136,13 @@ async function initBracketPage() {
     state = createEmptyBracketState();
     renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
     setSyncStatus(syncStatus, "Leerer Baum wird gespeichert...", "pending");
-    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
+    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus, false);
   });
 }
 
 const awaitPushBracketState = debounce(async (ref, state, syncStatus) => {
   try {
-    await setDoc(ref, createBracketPayload(state), { merge: true });
+    await writeBracketState(ref, state);
     setSyncStatus(syncStatus, "Gespeichert", "live");
   } catch (error) {
     console.error(error);
@@ -637,6 +637,10 @@ function createBracketPayload(state) {
   };
 }
 
+async function writeBracketState(ref, state) {
+  await setDoc(ref, createBracketPayload(state));
+}
+
 function needsBracketMigration(rawState) {
   if (!rawState || typeof rawState !== "object") {
     return true;
@@ -845,9 +849,14 @@ function debounce(callback, wait) {
   };
 }
 
-async function pushImmediate(ref, payload, syncStatus) {
+async function pushImmediate(ref, payload, syncStatus, merge = true) {
   try {
-    await setDoc(ref, payload, { merge: true });
+    if (merge) {
+      await setDoc(ref, payload, { merge: true });
+    } else {
+      await setDoc(ref, payload);
+    }
+
     setSyncStatus(syncStatus, "Gespeichert", "live");
   } catch (error) {
     console.error(error);
