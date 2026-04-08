@@ -11,20 +11,6 @@ import { firebaseConfig } from "./config.js";
 const BRACKET_DOC_PATH = ["publicState", "bracket"];
 const RANKING_DOC_PATH = ["publicState", "ranking"];
 
-const bracketDemoPlayers = [
-  "Kai", "Mats", "Nico", "Tamme", "Bene", "Lasse", "Jan", "Fiete",
-  "Juli", "Tjark", "Mika", "Hauke", "Oke", "Sören", "Peer", "Marten",
-  "Eike", "Finn", "Arne", "Luca", "Morten", "Henning", "Bjarne", "Nils",
-  "Timo", "Lennart", "Malte", "Keno", "Jasper", "Marlon"
-];
-
-const rankingDemoState = [
-  { id: makeId(), name: "Kai", games: 4, wins: 4, legsFor: 19, legsAgainst: 10, oneEighty: 6, average: 63.5, points: 12 },
-  { id: makeId(), name: "Jan", games: 4, wins: 3, legsFor: 16, legsAgainst: 9, oneEighty: 5, average: 61.1, points: 9 },
-  { id: makeId(), name: "Nico", games: 3, wins: 2, legsFor: 11, legsAgainst: 10, oneEighty: 2, average: 55.8, points: 6 },
-  { id: makeId(), name: "Lasse", games: 3, wins: 1, legsFor: 8, legsAgainst: 12, oneEighty: 1, average: 52.4, points: 3 }
-];
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
@@ -141,16 +127,6 @@ async function initBracketPage() {
     pushBracketState();
   });
 
-  document.getElementById("loadBracketDemo")?.addEventListener("click", async () => {
-    state = normalizeBracketState({
-      playersText: bracketDemoPlayers.join("\n"),
-      rounds: []
-    });
-    renderBracketPage(state, playersText, bracketRounds, championName);
-    setSyncStatus(syncStatus, "Demo-Baum wird gespeichert...", "pending");
-    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
-  });
-
   document.getElementById("resetBracket")?.addEventListener("click", async () => {
     state = createEmptyBracketState();
     renderBracketPage(state, playersText, bracketRounds, championName);
@@ -236,7 +212,7 @@ async function initRankingPage() {
 
   onSnapshot(rankingRef, async (snapshot) => {
     if (!snapshot.exists()) {
-      await setDoc(rankingRef, createRankingPayload(cloneValue(rankingDemoState)), { merge: true });
+      await setDoc(rankingRef, createRankingPayload([]), { merge: true });
       return;
     }
 
@@ -275,9 +251,9 @@ async function initRankingPage() {
   });
 
   document.getElementById("resetRanking")?.addEventListener("click", async () => {
-    state = cloneValue(rankingDemoState);
+    state = [];
     renderRankingTable();
-    setSyncStatus(syncStatus, "Demo-Ranking wird gespeichert...", "pending");
+    setSyncStatus(syncStatus, "Leeres Ranking wird gespeichert...", "pending");
     await pushImmediate(rankingRef, createRankingPayload(state), syncStatus);
   });
 
@@ -652,7 +628,7 @@ function createRankingRow(name = "") {
 
 function normalizeRankingState(value) {
   if (!Array.isArray(value)) {
-    return cloneValue(rankingDemoState);
+    return [];
   }
 
   return value.map((row) => ({
