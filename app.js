@@ -60,6 +60,7 @@ async function initBracketPage() {
   const playersText = document.getElementById("playersText");
   const bracketRounds = document.getElementById("bracketRounds");
   const championName = document.getElementById("championName");
+  const saveBracket = document.getElementById("saveBracket");
   let state = createEmptyBracketState();
   let isApplyingRemote = false;
 
@@ -71,35 +72,39 @@ async function initBracketPage() {
       return;
     }
 
+    const remoteState = snapshot.data()?.state;
     isApplyingRemote = true;
-    state = normalizeBracketState(snapshot.data()?.state);
-    renderBracketPage(state, playersText, bracketRounds, championName);
+    state = normalizeBracketState(remoteState);
+    renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
     isApplyingRemote = false;
+
+    if (needsBracketMigration(remoteState)) {
+      await setDoc(bracketRef, createBracketPayload(state), { merge: true });
+    }
+
     setSyncStatus(syncStatus, "Cloud Sync aktiv", "live");
   }, (error) => {
     console.error(error);
     setSyncStatus(syncStatus, "Cloud Sync fehlgeschlagen", "error");
   });
 
-  const pushBracketState = debounce(async () => {
-    try {
-      await setDoc(bracketRef, createBracketPayload(state), { merge: true });
-      setSyncStatus(syncStatus, "Gespeichert", "live");
-    } catch (error) {
-      console.error(error);
-      setSyncStatus(syncStatus, "Speichern fehlgeschlagen", "error");
-    }
-  }, 500);
-
-  playersText?.addEventListener("input", (event) => {
+  playersText?.addEventListener("input", () => {
     if (isApplyingRemote) {
       return;
     }
 
-    state = reshapeBracketStateForPlayers(event.target.value, state);
-    renderBracketPage(state, playersText, bracketRounds, championName);
-    setSyncStatus(syncStatus, "Spielerliste wird synchronisiert...", "pending");
-    pushBracketState();
+    setSyncStatus(syncStatus, "Namen geändert. Mit Speichern auslosen und synchronisieren.", "pending");
+  });
+
+  saveBracket?.addEventListener("click", async () => {
+    if (isApplyingRemote || !playersText) {
+      return;
+    }
+
+    state = reshapeBracketStateForPlayers(playersText.value, state);
+    renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
+    setSyncStatus(syncStatus, "Turnierbaum wird gespeichert...", "pending");
+    await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
   });
 
   bracketRounds?.addEventListener("input", (event) => {
@@ -124,21 +129,32 @@ async function initBracketPage() {
     state = normalizeBracketState(state);
     renderBracketPage(state, playersText, bracketRounds, championName);
     setSyncStatus(syncStatus, "Scores werden synchronisiert...", "pending");
-    pushBracketState();
+    awaitPushBracketState(bracketRef, state, syncStatus);
   });
 
   document.getElementById("resetBracket")?.addEventListener("click", async () => {
     state = createEmptyBracketState();
-    renderBracketPage(state, playersText, bracketRounds, championName);
+    renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
     setSyncStatus(syncStatus, "Leerer Baum wird gespeichert...", "pending");
     await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
   });
 }
 
-function renderBracketPage(state, playersTextElement, bracketRoundsElement, championNameElement) {
-  const bracket = buildBracketView(state);
+const awaitPushBracketState = debounce(async (ref, state, syncStatus) => {
+  try {
+    await setDoc(ref, createBracketPayload(state), { merge: true });
+    setSyncStatus(syncStatus, "Gespeichert", "live");
+  } catch (error) {
+    console.error(error);
+    setSyncStatus(syncStatus, "Speichern fehlgeschlagen", "error");
+  }
+}, 500);
 
-  if (playersTextElement && playersTextElement.value !== bracket.playersText) {
+function renderBracketPage(state, playersTextElement, bracketRoundsElement, championNameElement, options = {}) {
+  const bracket = buildBracketView(state);
+  const { syncPlayersText = false } = options;
+
+  if (syncPlayersText && playersTextElement && playersTextElement.value !== bracket.playersText) {
     playersTextElement.value = bracket.playersText;
   }
 
@@ -350,6 +366,7 @@ async function initRankingPage() {
 function createEmptyBracketState() {
   return {
     playersText: "",
+    seeding: [],
     rounds: []
   };
 }
@@ -359,10 +376,12 @@ function reshapeBracketStateForPlayers(playersText, currentState) {
   const cleanedText = normalizePlayersText(playersText);
   const nextPlayers = parsePlayers(cleanedText);
   const nextSlotCount = nextPowerOfTwo(Math.max(2, nextPlayers.length || 2));
-  const shouldResetScores = nextPlayers.length !== previous.players.length || nextSlotCount !== previous.slotCount;
+  const playersChanged = !arePlayerListsEqual(nextPlayers, previous.players);
+  const shouldResetScores = playersChanged || nextSlotCount !== previous.slotCount;
 
   return normalizeBracketState({
     playersText: cleanedText,
+    seeding: playersChanged ? shufflePlayers(nextPlayers) : previous.seeding,
     rounds: shouldResetScores ? [] : previous.rounds
   });
 }
@@ -372,9 +391,10 @@ function normalizeBracketState(value) {
     return hydrateBracketState(createEmptyBracketState());
   }
 
-  if (typeof value.playersText === "string" || Array.isArray(value.rounds)) {
+  if (typeof value.playersText === "string" || Array.isArray(value.rounds) || Array.isArray(value.seeding)) {
     return hydrateBracketState({
       playersText: typeof value.playersText === "string" ? value.playersText : "",
+      seeding: Array.isArray(value.seeding) ? value.seeding : [],
       rounds: Array.isArray(value.rounds) ? value.rounds : []
     });
   }
@@ -382,6 +402,7 @@ function normalizeBracketState(value) {
   if (Array.isArray(value.players)) {
     return hydrateBracketState({
       playersText: value.players.join("\n"),
+      seeding: Array.isArray(value.seeding) ? value.seeding : value.players,
       rounds: Array.isArray(value.rounds) ? value.rounds : []
     });
   }
@@ -394,6 +415,7 @@ function normalizeBracketState(value) {
 
     return hydrateBracketState({
       playersText,
+      seeding: parsePlayers(playersText),
       rounds: [
         value.quarterfinals.map((match) => ({
           scoreA: sanitizeScore(String(match?.scoreA || "")),
@@ -421,6 +443,7 @@ function normalizeBracketState(value) {
 function hydrateBracketState(rawState) {
   const playersText = normalizePlayersText(rawState.playersText || "");
   const players = parsePlayers(playersText);
+  const seeding = normalizeBracketSeeding(rawState.seeding, players);
   const slotCount = nextPowerOfTwo(Math.max(2, players.length || 2));
   const roundCount = Math.log2(slotCount);
   const rounds = Array.from({ length: roundCount }, (_, roundIndex) => {
@@ -434,6 +457,7 @@ function hydrateBracketState(rawState) {
   return {
     playersText,
     players,
+    seeding,
     slotCount,
     roundCount,
     rounds
@@ -443,7 +467,7 @@ function hydrateBracketState(rawState) {
 function buildBracketView(inputState) {
   const state = normalizeBracketState(inputState);
   const seededPlayers = [
-    ...state.players,
+    ...state.seeding,
     ...Array.from({ length: state.slotCount - state.players.length }, () => "")
   ];
 
@@ -606,10 +630,93 @@ function createBracketPayload(state) {
   return {
     state: {
       playersText: normalized.playersText,
+      seeding: normalized.seeding,
       rounds: normalized.rounds
     },
     updatedAt: new Date().toISOString()
   };
+}
+
+function needsBracketMigration(rawState) {
+  if (!rawState || typeof rawState !== "object") {
+    return true;
+  }
+
+  const normalized = createBracketPayload(rawState).state;
+  const hasOnlyExpectedKeys = Object.keys(rawState).every((key) => ["playersText", "seeding", "rounds"].includes(key));
+
+  return !hasOnlyExpectedKeys
+    || rawState.playersText !== normalized.playersText
+    || !Array.isArray(rawState.seeding)
+    || JSON.stringify(rawState.seeding) !== JSON.stringify(normalized.seeding)
+    || !Array.isArray(rawState.rounds)
+    || JSON.stringify(rawState.rounds) !== JSON.stringify(normalized.rounds);
+}
+
+function normalizeBracketSeeding(rawSeeding, players) {
+  const seeding = Array.isArray(rawSeeding)
+    ? rawSeeding.map((player) => String(player).trim()).filter(Boolean)
+    : [];
+
+  if (haveSamePlayers(players, seeding)) {
+    return seeding;
+  }
+
+  return shufflePlayers(players);
+}
+
+function haveSamePlayers(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const counts = new Map();
+
+  left.forEach((player) => {
+    counts.set(player, (counts.get(player) || 0) + 1);
+  });
+
+  for (const player of right) {
+    const remaining = counts.get(player);
+    if (!remaining) {
+      return false;
+    }
+
+    if (remaining === 1) {
+      counts.delete(player);
+    } else {
+      counts.set(player, remaining - 1);
+    }
+  }
+
+  return counts.size === 0;
+}
+
+function arePlayerListsEqual(left, right) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((player, index) => player === right[index]);
+}
+
+function shufflePlayers(players) {
+  const shuffled = [...players];
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = getRandomIndex(index + 1);
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+
+  return shuffled;
+}
+
+function getRandomIndex(max) {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    return crypto.getRandomValues(new Uint32Array(1))[0] % max;
+  }
+
+  return Math.floor(Math.random() * max);
 }
 
 function createRankingRow(name = "") {

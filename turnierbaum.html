@@ -26,13 +26,15 @@
             <p class="eyebrow">Turniersteuerung</p>
             <h1>Der Spielplan für maximalen Pfeildruck.</h1>
             <p>
-              Einen Namen pro Zeile eintragen. Der KO-Baum springt automatisch
-              auf die passende Größe, verteilt Freilose und schiebt Sieger Runde
-              für Runde bis zum Champion durch.
+              Erst alle Namen eintragen, dann auf Speichern klicken. Danach
+              werden die Startplätze zufällig ausgelost, im Cloud-Sync fixiert,
+              Freilose automatisch verteilt und Sieger Runde für Runde bis zum
+              Champion durchgeschoben.
             </p>
             <p class="sync-status" id="syncStatus">Cloud Sync wird verbunden...</p>
           </div>
           <div class="toolbar">
+            <button class="button button-primary" id="saveBracket" type="button">Speichern</button>
             <button class="button button-secondary" id="resetBracket" type="button">Leeren</button>
           </div>
         </section>
@@ -45,8 +47,9 @@
                 <small>Ein Name pro Zeile</small>
               </div>
               <p class="roster-copy">
-                Für 30 Spieler springt der Baum automatisch auf ein 32er Feld und
-                verteilt die zwei Freilose selbst.
+                Für 30 Spieler springt der Baum beim Speichern automatisch auf
+                ein 32er Feld, lost die Paarungen zufällig aus und verteilt die
+                zwei Freilose selbst.
               </p>
               <div class="bracket-meta" id="bracketMeta">
                 <span class="meta-pill"><strong id="playerCount">0</strong> Spieler</span>
