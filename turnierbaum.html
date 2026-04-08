@@ -26,8 +26,9 @@
             <p class="eyebrow">Turniersteuerung</p>
             <h1>Der Spielplan für maximalen Pfeildruck.</h1>
             <p>
-              Trage im Viertelfinale nur Namen und Ergebnisse ein. Sieger werden
-              automatisch in Halbfinale, Finale und Champion-Slot geschoben.
+              Einen Namen pro Zeile eintragen. Der KO-Baum springt automatisch
+              auf die passende Größe, verteilt Freilose und schiebt Sieger Runde
+              für Runde bis zum Champion durch.
             </p>
             <p class="sync-status" id="syncStatus">Cloud Sync wird verbunden...</p>
           </div>
@@ -38,110 +39,30 @@
         </section>
 
         <section class="bracket-layout">
-          <div class="bracket-grid">
-            <article class="panel round-column" data-reveal>
+          <div class="bracket-control-grid">
+            <article class="panel roster-panel" data-reveal>
               <div class="round-head">
-                <span>Viertelfinale</span>
-                <small>Namen frei editierbar</small>
+                <span>Spielerliste</span>
+                <small>Ein Name pro Zeile</small>
               </div>
-
-              <div class="match-card">
-                <div class="match-title">Match 1</div>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="0" data-side="a" placeholder="Spieler A" />
-                  <input class="score-input" data-round="quarterfinals" data-match="0" data-side="a" inputmode="numeric" placeholder="0" />
-                </label>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="0" data-side="b" placeholder="Spieler B" />
-                  <input class="score-input" data-round="quarterfinals" data-match="0" data-side="b" inputmode="numeric" placeholder="0" />
-                </label>
+              <p class="roster-copy">
+                Für 30 Spieler springt der Baum automatisch auf ein 32er Feld und
+                verteilt die zwei Freilose selbst.
+              </p>
+              <div class="bracket-meta" id="bracketMeta">
+                <span class="meta-pill"><strong id="playerCount">0</strong> Spieler</span>
+                <span class="meta-pill"><strong id="bracketSize">2</strong>er Baum</span>
+                <span class="meta-pill"><strong id="byeCount">2</strong> Freilose</span>
+                <span class="meta-pill"><strong id="roundCount">1</strong> Runden</span>
               </div>
-
-              <div class="match-card">
-                <div class="match-title">Match 2</div>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="1" data-side="a" placeholder="Spieler C" />
-                  <input class="score-input" data-round="quarterfinals" data-match="1" data-side="a" inputmode="numeric" placeholder="0" />
-                </label>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="1" data-side="b" placeholder="Spieler D" />
-                  <input class="score-input" data-round="quarterfinals" data-match="1" data-side="b" inputmode="numeric" placeholder="0" />
-                </label>
-              </div>
-
-              <div class="match-card">
-                <div class="match-title">Match 3</div>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="2" data-side="a" placeholder="Spieler E" />
-                  <input class="score-input" data-round="quarterfinals" data-match="2" data-side="a" inputmode="numeric" placeholder="0" />
-                </label>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="2" data-side="b" placeholder="Spieler F" />
-                  <input class="score-input" data-round="quarterfinals" data-match="2" data-side="b" inputmode="numeric" placeholder="0" />
-                </label>
-              </div>
-
-              <div class="match-card">
-                <div class="match-title">Match 4</div>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="3" data-side="a" placeholder="Spieler G" />
-                  <input class="score-input" data-round="quarterfinals" data-match="3" data-side="a" inputmode="numeric" placeholder="0" />
-                </label>
-                <label class="player-row">
-                  <input class="player-input" data-round="quarterfinals" data-match="3" data-side="b" placeholder="Spieler H" />
-                  <input class="score-input" data-round="quarterfinals" data-match="3" data-side="b" inputmode="numeric" placeholder="0" />
-                </label>
-              </div>
-            </article>
-
-            <article class="panel round-column" data-reveal>
-              <div class="round-head">
-                <span>Halbfinale</span>
-                <small>Sieger rücken automatisch nach</small>
-              </div>
-
-              <div class="match-card">
-                <div class="match-title">Halbfinale 1</div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="semifinals-0-a">Offen</span>
-                  <input class="score-input" data-round="semifinals" data-match="0" data-side="a" inputmode="numeric" placeholder="0" />
-                </div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="semifinals-0-b">Offen</span>
-                  <input class="score-input" data-round="semifinals" data-match="0" data-side="b" inputmode="numeric" placeholder="0" />
-                </div>
-              </div>
-
-              <div class="match-card">
-                <div class="match-title">Halbfinale 2</div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="semifinals-1-a">Offen</span>
-                  <input class="score-input" data-round="semifinals" data-match="1" data-side="a" inputmode="numeric" placeholder="0" />
-                </div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="semifinals-1-b">Offen</span>
-                  <input class="score-input" data-round="semifinals" data-match="1" data-side="b" inputmode="numeric" placeholder="0" />
-                </div>
-              </div>
-            </article>
-
-            <article class="panel round-column" data-reveal>
-              <div class="round-head">
-                <span>Finale</span>
-                <small>Nur noch ein Schritt bis zur Krone</small>
-              </div>
-
-              <div class="match-card final-card">
-                <div class="match-title">Grand Final</div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="final-0-a">Offen</span>
-                  <input class="score-input" data-round="final" data-match="0" data-side="a" inputmode="numeric" placeholder="0" />
-                </div>
-                <div class="player-row is-locked">
-                  <span class="locked-player" data-display="final-0-b">Offen</span>
-                  <input class="score-input" data-round="final" data-match="0" data-side="b" inputmode="numeric" placeholder="0" />
-                </div>
-              </div>
+              <label class="roster-field" for="playersText">
+                <textarea
+                  class="roster-textarea"
+                  id="playersText"
+                  placeholder="Kai&#10;Mats&#10;Nico&#10;Tamme"
+                  spellcheck="false"
+                ></textarea>
+              </label>
             </article>
 
             <aside class="panel champion-panel" data-reveal>
@@ -154,6 +75,16 @@
               <div class="champion-badge">Golden Arrow Protocol</div>
             </aside>
           </div>
+
+          <article class="panel bracket-stage" data-reveal>
+            <div class="round-head">
+              <span>Dynamischer KO-Baum</span>
+              <small>Scores direkt im Match pflegen</small>
+            </div>
+            <div class="bracket-scroll">
+              <div class="dynamic-bracket" id="bracketRounds"></div>
+            </div>
+          </article>
         </section>
       </main>
     </div>

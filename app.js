@@ -11,21 +11,12 @@ import { firebaseConfig } from "./config.js";
 const BRACKET_DOC_PATH = ["publicState", "bracket"];
 const RANKING_DOC_PATH = ["publicState", "ranking"];
 
-const bracketDemoState = {
-  quarterfinals: [
-    { a: "Kai", b: "Mats", scoreA: "4", scoreB: "2" },
-    { a: "Nico", b: "Tamme", scoreA: "4", scoreB: "3" },
-    { a: "Bene", b: "Lasse", scoreA: "1", scoreB: "4" },
-    { a: "Jan", b: "Fiete", scoreA: "4", scoreB: "0" }
-  ],
-  semifinals: [
-    { scoreA: "5", scoreB: "4" },
-    { scoreA: "2", scoreB: "5" }
-  ],
-  final: [
-    { scoreA: "6", scoreB: "4" }
-  ]
-};
+const bracketDemoPlayers = [
+  "Kai", "Mats", "Nico", "Tamme", "Bene", "Lasse", "Jan", "Fiete",
+  "Juli", "Tjark", "Mika", "Hauke", "Oke", "Sören", "Peer", "Marten",
+  "Eike", "Finn", "Arne", "Luca", "Morten", "Henning", "Bjarne", "Nils",
+  "Timo", "Lennart", "Malte", "Keno", "Jasper", "Marlon"
+];
 
 const rankingDemoState = [
   { id: makeId(), name: "Kai", games: 4, wins: 4, legsFor: 19, legsAgainst: 10, oneEighty: 6, average: 63.5, points: 12 },
@@ -80,6 +71,9 @@ function initReveal() {
 async function initBracketPage() {
   const syncStatus = document.getElementById("syncStatus");
   const bracketRef = doc(db, ...BRACKET_DOC_PATH);
+  const playersText = document.getElementById("playersText");
+  const bracketRounds = document.getElementById("bracketRounds");
+  const championName = document.getElementById("championName");
   let state = createEmptyBracketState();
   let isApplyingRemote = false;
 
@@ -93,7 +87,7 @@ async function initBracketPage() {
 
     isApplyingRemote = true;
     state = normalizeBracketState(snapshot.data()?.state);
-    renderBracket(state);
+    renderBracketPage(state, playersText, bracketRounds, championName);
     isApplyingRemote = false;
     setSyncStatus(syncStatus, "Cloud Sync aktiv", "live");
   }, (error) => {
@@ -111,102 +105,124 @@ async function initBracketPage() {
     }
   }, 500);
 
-  document.querySelectorAll(".player-input").forEach((input) => {
-    input.addEventListener("input", (event) => {
-      if (isApplyingRemote) {
-        return;
-      }
+  playersText?.addEventListener("input", (event) => {
+    if (isApplyingRemote) {
+      return;
+    }
 
-      const { round, match, side } = event.target.dataset;
-      state[round][Number(match)][side] = event.target.value;
-      renderBracket(state);
-      setSyncStatus(syncStatus, "Änderungen werden synchronisiert...", "pending");
-      pushBracketState();
-    });
+    state = reshapeBracketStateForPlayers(event.target.value, state);
+    renderBracketPage(state, playersText, bracketRounds, championName);
+    setSyncStatus(syncStatus, "Spielerliste wird synchronisiert...", "pending");
+    pushBracketState();
   });
 
-  document.querySelectorAll(".score-input").forEach((input) => {
-    input.addEventListener("input", (event) => {
-      if (isApplyingRemote) {
-        return;
-      }
+  bracketRounds?.addEventListener("input", (event) => {
+    if (isApplyingRemote) {
+      return;
+    }
 
-      const { round, match, side } = event.target.dataset;
-      state[round][Number(match)][scoreKey(side)] = sanitizeScore(event.target.value);
-      renderBracket(state);
-      setSyncStatus(syncStatus, "Änderungen werden synchronisiert...", "pending");
-      pushBracketState();
-    });
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || !target.classList.contains("score-input")) {
+      return;
+    }
+
+    const roundIndex = Number(target.dataset.roundIndex);
+    const matchIndex = Number(target.dataset.matchIndex);
+    const side = target.dataset.side;
+
+    if (!Number.isInteger(roundIndex) || !Number.isInteger(matchIndex)) {
+      return;
+    }
+
+    state.rounds[roundIndex][matchIndex][scoreKey(side)] = sanitizeScore(target.value);
+    state = normalizeBracketState(state);
+    renderBracketPage(state, playersText, bracketRounds, championName);
+    setSyncStatus(syncStatus, "Scores werden synchronisiert...", "pending");
+    pushBracketState();
   });
 
   document.getElementById("loadBracketDemo")?.addEventListener("click", async () => {
-    state = cloneValue(bracketDemoState);
-    renderBracket(state);
-    setSyncStatus(syncStatus, "Demo wird gespeichert...", "pending");
+    state = normalizeBracketState({
+      playersText: bracketDemoPlayers.join("\n"),
+      rounds: []
+    });
+    renderBracketPage(state, playersText, bracketRounds, championName);
+    setSyncStatus(syncStatus, "Demo-Baum wird gespeichert...", "pending");
     await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
   });
 
   document.getElementById("resetBracket")?.addEventListener("click", async () => {
     state = createEmptyBracketState();
-    renderBracket(state);
+    renderBracketPage(state, playersText, bracketRounds, championName);
     setSyncStatus(syncStatus, "Leerer Baum wird gespeichert...", "pending");
     await pushImmediate(bracketRef, createBracketPayload(state), syncStatus);
   });
 }
 
-function renderBracket(state) {
-  renderQuarterfinalInputs(state.quarterfinals);
-  renderScoreInputs("quarterfinals", state.quarterfinals);
-  renderScoreInputs("semifinals", state.semifinals);
-  renderScoreInputs("final", state.final);
+function renderBracketPage(state, playersTextElement, bracketRoundsElement, championNameElement) {
+  const bracket = buildBracketView(state);
 
-  const quarterWinners = state.quarterfinals.map(determineWinner);
-  const semifinalMatches = [
-    { a: quarterWinners[0], b: quarterWinners[1], scoreA: state.semifinals[0].scoreA, scoreB: state.semifinals[0].scoreB },
-    { a: quarterWinners[2], b: quarterWinners[3], scoreA: state.semifinals[1].scoreA, scoreB: state.semifinals[1].scoreB }
-  ];
-
-  const semifinalWinners = semifinalMatches.map(determineWinner);
-  const finalMatch = [
-    { a: semifinalWinners[0], b: semifinalWinners[1], scoreA: state.final[0].scoreA, scoreB: state.final[0].scoreB }
-  ];
-  const champion = determineWinner(finalMatch[0]);
-
-  renderLockedName("semifinals-0-a", quarterWinners[0]);
-  renderLockedName("semifinals-0-b", quarterWinners[1]);
-  renderLockedName("semifinals-1-a", quarterWinners[2]);
-  renderLockedName("semifinals-1-b", quarterWinners[3]);
-  renderLockedName("final-0-a", semifinalWinners[0]);
-  renderLockedName("final-0-b", semifinalWinners[1]);
-
-  const championName = document.getElementById("championName");
-  if (championName) {
-    championName.textContent = champion || "Noch offen";
+  if (playersTextElement && playersTextElement.value !== bracket.playersText) {
+    playersTextElement.value = bracket.playersText;
   }
-}
 
-function renderQuarterfinalInputs(matches) {
-  document.querySelectorAll(".player-input").forEach((input) => {
-    const { match, side } = input.dataset;
-    input.value = matches[Number(match)][side] || "";
-  });
-}
+  updateBracketMeta(bracket);
 
-function renderScoreInputs(round, matches) {
-  document.querySelectorAll(`.score-input[data-round="${round}"]`).forEach((input) => {
-    const { match, side } = input.dataset;
-    input.value = matches[Number(match)][scoreKey(side)] || "";
-  });
-}
+  if (championNameElement) {
+    championNameElement.textContent = bracket.champion || "Noch offen";
+  }
 
-function renderLockedName(key, value) {
-  const element = document.querySelector(`[data-display="${key}"]`);
-  if (!element) {
+  if (!bracketRoundsElement) {
     return;
   }
 
-  element.textContent = value || "Offen";
-  element.classList.toggle("is-pending", !value);
+  bracketRoundsElement.innerHTML = bracket.rounds.map((round, roundIndex) => `
+    <article class="round-column dynamic-round">
+      <div class="round-head">
+        <span>${getRoundTitle(round.matchCount, roundIndex, bracket.rounds.length)}</span>
+        <small>${round.matchCount} ${round.matchCount === 1 ? "Match" : "Matches"}</small>
+      </div>
+      ${round.matches.map((match, matchIndex) => `
+        <div class="match-card ${match.winner ? "has-winner" : ""}">
+          <div class="match-title">Match ${matchIndex + 1}</div>
+          <div class="player-row is-locked">
+            <span class="locked-player ${match.playerA ? "" : "is-pending"}">${escapeHtml(match.labelA)}</span>
+            <input
+              class="score-input"
+              data-round-index="${roundIndex}"
+              data-match-index="${matchIndex}"
+              data-side="a"
+              inputmode="numeric"
+              placeholder="0"
+              value="${match.scoreA}"
+              ${match.scoreDisabled ? "disabled" : ""}
+            />
+          </div>
+          <div class="player-row is-locked">
+            <span class="locked-player ${match.playerB ? "" : "is-pending"}">${escapeHtml(match.labelB)}</span>
+            <input
+              class="score-input"
+              data-round-index="${roundIndex}"
+              data-match-index="${matchIndex}"
+              data-side="b"
+              inputmode="numeric"
+              placeholder="0"
+              value="${match.scoreB}"
+              ${match.scoreDisabled ? "disabled" : ""}
+            />
+          </div>
+          <div class="match-result">${escapeHtml(match.resultLabel)}</div>
+        </div>
+      `).join("")}
+    </article>
+  `).join("");
+}
+
+function updateBracketMeta(bracket) {
+  setText("playerCount", bracket.players.length);
+  setText("bracketSize", bracket.slotCount);
+  setText("byeCount", bracket.byeCount);
+  setText("roundCount", bracket.roundCount);
 }
 
 async function initRankingPage() {
@@ -269,12 +285,9 @@ async function initRankingPage() {
     try {
       const bracketSnap = await getDoc(doc(db, ...BRACKET_DOC_PATH));
       const bracketState = normalizeBracketState(bracketSnap.data()?.state);
-      const bracketNames = bracketState.quarterfinals
-        .flatMap((match) => [match.a, match.b])
-        .map((name) => name.trim())
-        .filter(Boolean);
-
+      const bracketNames = parsePlayers(bracketState.playersText);
       const existingNames = new Set(state.map((row) => row.name.trim().toLowerCase()).filter(Boolean));
+
       bracketNames.forEach((name) => {
         if (!existingNames.has(name.toLowerCase())) {
           state.push(createRankingRow(name));
@@ -358,58 +371,267 @@ async function initRankingPage() {
   }
 }
 
-function determineWinner(match) {
-  if (!match?.a || !match?.b) {
-    return "";
-  }
-
-  const scoreA = Number(match.scoreA);
-  const scoreB = Number(match.scoreB);
-
-  if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || match.scoreA === "" || match.scoreB === "" || scoreA === scoreB) {
-    return "";
-  }
-
-  return scoreA > scoreB ? match.a : match.b;
-}
-
 function createEmptyBracketState() {
   return {
-    quarterfinals: Array.from({ length: 4 }, () => ({ a: "", b: "", scoreA: "", scoreB: "" })),
-    semifinals: Array.from({ length: 2 }, () => ({ scoreA: "", scoreB: "" })),
-    final: [{ scoreA: "", scoreB: "" }]
+    playersText: "",
+    rounds: []
   };
+}
+
+function reshapeBracketStateForPlayers(playersText, currentState) {
+  const previous = normalizeBracketState(currentState);
+  const cleanedText = normalizePlayersText(playersText);
+  const nextPlayers = parsePlayers(cleanedText);
+  const nextSlotCount = nextPowerOfTwo(Math.max(2, nextPlayers.length || 2));
+  const shouldResetScores = nextPlayers.length !== previous.players.length || nextSlotCount !== previous.slotCount;
+
+  return normalizeBracketState({
+    playersText: cleanedText,
+    rounds: shouldResetScores ? [] : previous.rounds
+  });
 }
 
 function normalizeBracketState(value) {
-  const fallback = createEmptyBracketState();
   if (!value || typeof value !== "object") {
-    return fallback;
+    return hydrateBracketState(createEmptyBracketState());
   }
 
+  if (typeof value.playersText === "string" || Array.isArray(value.rounds)) {
+    return hydrateBracketState({
+      playersText: typeof value.playersText === "string" ? value.playersText : "",
+      rounds: Array.isArray(value.rounds) ? value.rounds : []
+    });
+  }
+
+  if (Array.isArray(value.players)) {
+    return hydrateBracketState({
+      playersText: value.players.join("\n"),
+      rounds: Array.isArray(value.rounds) ? value.rounds : []
+    });
+  }
+
+  if (Array.isArray(value.quarterfinals)) {
+    const playersText = value.quarterfinals
+      .flatMap((match) => [String(match?.a || ""), String(match?.b || "")])
+      .filter((name) => name.trim() !== "")
+      .join("\n");
+
+    return hydrateBracketState({
+      playersText,
+      rounds: [
+        value.quarterfinals.map((match) => ({
+          scoreA: sanitizeScore(String(match?.scoreA || "")),
+          scoreB: sanitizeScore(String(match?.scoreB || ""))
+        })),
+        Array.isArray(value.semifinals)
+          ? value.semifinals.map((match) => ({
+              scoreA: sanitizeScore(String(match?.scoreA || "")),
+              scoreB: sanitizeScore(String(match?.scoreB || ""))
+            }))
+          : [],
+        Array.isArray(value.final)
+          ? value.final.map((match) => ({
+              scoreA: sanitizeScore(String(match?.scoreA || "")),
+              scoreB: sanitizeScore(String(match?.scoreB || ""))
+            }))
+          : []
+      ]
+    });
+  }
+
+  return hydrateBracketState(createEmptyBracketState());
+}
+
+function hydrateBracketState(rawState) {
+  const playersText = normalizePlayersText(rawState.playersText || "");
+  const players = parsePlayers(playersText);
+  const slotCount = nextPowerOfTwo(Math.max(2, players.length || 2));
+  const roundCount = Math.log2(slotCount);
+  const rounds = Array.from({ length: roundCount }, (_, roundIndex) => {
+    const matchCount = slotCount / (2 ** (roundIndex + 1));
+    return Array.from({ length: matchCount }, (_, matchIndex) => ({
+      scoreA: sanitizeScore(String(rawState.rounds?.[roundIndex]?.[matchIndex]?.scoreA || "")),
+      scoreB: sanitizeScore(String(rawState.rounds?.[roundIndex]?.[matchIndex]?.scoreB || ""))
+    }));
+  });
+
   return {
-    quarterfinals: Array.from({ length: 4 }, (_, index) => ({
-      a: String(value.quarterfinals?.[index]?.a || ""),
-      b: String(value.quarterfinals?.[index]?.b || ""),
-      scoreA: sanitizeScore(String(value.quarterfinals?.[index]?.scoreA || "")),
-      scoreB: sanitizeScore(String(value.quarterfinals?.[index]?.scoreB || ""))
-    })),
-    semifinals: Array.from({ length: 2 }, (_, index) => ({
-      scoreA: sanitizeScore(String(value.semifinals?.[index]?.scoreA || "")),
-      scoreB: sanitizeScore(String(value.semifinals?.[index]?.scoreB || ""))
-    })),
-    final: [
-      {
-        scoreA: sanitizeScore(String(value.final?.[0]?.scoreA || "")),
-        scoreB: sanitizeScore(String(value.final?.[0]?.scoreB || ""))
-      }
-    ]
+    playersText,
+    players,
+    slotCount,
+    roundCount,
+    rounds
   };
 }
 
-function createBracketPayload(state) {
+function buildBracketView(inputState) {
+  const state = normalizeBracketState(inputState);
+  const seededPlayers = [
+    ...state.players,
+    ...Array.from({ length: state.slotCount - state.players.length }, () => "")
+  ];
+
+  let previousMatches = [];
+  const rounds = Array.from({ length: state.roundCount }, (_, roundIndex) => {
+    const matchCount = state.slotCount / (2 ** (roundIndex + 1));
+    const matches = Array.from({ length: matchCount }, (_, matchIndex) => {
+      const players = roundIndex === 0
+        ? {
+            playerA: seededPlayers[matchIndex * 2] || "",
+            playerB: seededPlayers[matchIndex * 2 + 1] || ""
+          }
+        : {
+            playerA: previousMatches[matchIndex * 2]?.winner || "",
+            playerB: previousMatches[matchIndex * 2 + 1]?.winner || ""
+          };
+
+      const score = state.rounds[roundIndex][matchIndex];
+      const winner = determineWinner(players.playerA, players.playerB, score.scoreA, score.scoreB);
+
+      return {
+        ...players,
+        scoreA: score.scoreA,
+        scoreB: score.scoreB,
+        winner,
+        matchCount,
+        scoreDisabled: !(players.playerA && players.playerB),
+        labelA: getSlotLabel(players.playerA, players.playerB, roundIndex),
+        labelB: getSlotLabel(players.playerB, players.playerA, roundIndex),
+        resultLabel: getResultLabel(players.playerA, players.playerB, winner)
+      };
+    });
+
+    previousMatches = matches;
+
+    return {
+      matchCount,
+      matches
+    };
+  });
+
   return {
-    state: normalizeBracketState(state),
+    ...state,
+    rounds,
+    byeCount: state.slotCount - state.players.length,
+    champion: rounds.at(-1)?.matches[0]?.winner || ""
+  };
+}
+
+function determineWinner(playerA, playerB, scoreA, scoreB) {
+  if (playerA && !playerB) {
+    return playerA;
+  }
+
+  if (!playerA && playerB) {
+    return playerB;
+  }
+
+  if (!playerA || !playerB) {
+    return "";
+  }
+
+  if (scoreA === "" || scoreB === "") {
+    return "";
+  }
+
+  const left = Number(scoreA);
+  const right = Number(scoreB);
+
+  if (!Number.isFinite(left) || !Number.isFinite(right) || left === right) {
+    return "";
+  }
+
+  return left > right ? playerA : playerB;
+}
+
+function getSlotLabel(player, opponent, roundIndex) {
+  if (player) {
+    return player;
+  }
+
+  if (opponent) {
+    return "Freilos";
+  }
+
+  return roundIndex === 0 ? "Freier Slot" : "Warten auf Sieger";
+}
+
+function getResultLabel(playerA, playerB, winner) {
+  if (!playerA && !playerB) {
+    return "Noch kein Match gesetzt";
+  }
+
+  if (winner && playerA && !playerB) {
+    return `${winner} rückt per Freilos weiter`;
+  }
+
+  if (winner && !playerA && playerB) {
+    return `${winner} rückt per Freilos weiter`;
+  }
+
+  if (winner) {
+    return `Sieger: ${winner}`;
+  }
+
+  if (playerA && playerB) {
+    return "Sieger offen";
+  }
+
+  return "Warten auf Gegner";
+}
+
+function getRoundTitle(matchCount, roundIndex, totalRounds) {
+  if (matchCount === 1) {
+    return "Finale";
+  }
+
+  if (matchCount === 2) {
+    return "Halbfinale";
+  }
+
+  if (matchCount === 4) {
+    return "Viertelfinale";
+  }
+
+  if (matchCount === 8) {
+    return "Achtelfinale";
+  }
+
+  if (matchCount === 16) {
+    return "Runde der 32";
+  }
+
+  if (matchCount === 32) {
+    return "Runde der 64";
+  }
+
+  return `Runde ${roundIndex + 1} / ${totalRounds}`;
+}
+
+function nextPowerOfTwo(value) {
+  return 2 ** Math.ceil(Math.log2(value));
+}
+
+function parsePlayers(playersText) {
+  return normalizePlayersText(playersText)
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function normalizePlayersText(value) {
+  return String(value)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
+function createBracketPayload(state) {
+  const normalized = normalizeBracketState(state);
+  return {
+    state: {
+      playersText: normalized.playersText,
+      rounds: normalized.rounds
+    },
     updatedAt: new Date().toISOString()
   };
 }
@@ -501,7 +723,7 @@ function sanitizeScore(value) {
     return "";
   }
 
-  const sanitized = value.replace(/[^\d]/g, "");
+  const sanitized = String(value).replace(/[^\d]/g, "");
   return sanitized.slice(0, 2);
 }
 
@@ -557,4 +779,11 @@ function setSyncStatus(element, message, state) {
 
   element.textContent = message;
   element.dataset.state = state;
+}
+
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.textContent = String(value);
+  }
 }
