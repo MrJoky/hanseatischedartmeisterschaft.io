@@ -29,6 +29,7 @@ const authState = {
   accessRecord: null,
   initialized: false,
   listeners: new Set(),
+  mode: "login",
   ui: null,
   user: null
 };
@@ -110,7 +111,7 @@ function initAuthPanel() {
       </div>
       <div class="auth-actions">
         <form class="auth-form" data-auth-form>
-          <label class="auth-field">
+          <label class="auth-field" data-auth-firstname-field hidden>
             <span>Vorname</span>
             <input class="auth-input" data-auth-firstname type="text" autocomplete="given-name" placeholder="Kai" />
           </label>
@@ -147,6 +148,7 @@ function initAuthPanel() {
 
   const form = panel.querySelector("[data-auth-form]");
   const emailInput = panel.querySelector("[data-auth-email]");
+  const firstNameField = panel.querySelector("[data-auth-firstname-field]");
   const firstNameInput = panel.querySelector("[data-auth-firstname]");
   const passwordInput = panel.querySelector("[data-auth-password]");
   const refreshButton = panel.querySelector("[data-auth-refresh]");
@@ -160,6 +162,7 @@ function initAuthPanel() {
   authState.ui = {
     emailInput,
     form,
+    firstNameField,
     firstNameInput,
     message,
     panel,
@@ -174,6 +177,7 @@ function initAuthPanel() {
 
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    setAuthMode("login");
 
     try {
       setAuthMessage("Anmeldung wird geprüft...", "pending");
@@ -186,6 +190,13 @@ function initAuthPanel() {
   });
 
   registerButton?.addEventListener("click", async () => {
+    if (authState.mode !== "register") {
+      setAuthMode("register");
+      setAuthMessage("Für die Registrierung bitte noch deinen Vornamen ergänzen.", "info");
+      firstNameInput?.focus();
+      return;
+    }
+
     try {
       const firstName = firstNameInput?.value?.trim() || "";
       if (!firstName) {
@@ -206,6 +217,7 @@ function initAuthPanel() {
       }, { merge: true });
       await sendEmailVerification(credential.user);
       setAuthMessage("Konto erstellt. Bitte E-Mail bestätigen und danach den Status aktualisieren.", "pending");
+      setAuthMode("login");
       form?.reset();
     } catch (error) {
       console.error(error);
@@ -253,6 +265,23 @@ function initAuthPanel() {
 
   renderAuthPanel();
   return authState.ui;
+}
+
+function setAuthMode(mode) {
+  authState.mode = mode;
+
+  if (!authState.ui) {
+    return;
+  }
+
+  const { firstNameField, firstNameInput } = authState.ui;
+  if (firstNameField) {
+    firstNameField.hidden = mode !== "register";
+  }
+
+  if (mode !== "register" && firstNameInput) {
+    firstNameInput.value = "";
+  }
 }
 
 function initNavAuth() {
@@ -495,6 +524,7 @@ function renderAuthPanel() {
 
   const {
     form,
+    firstNameField,
     panel,
     resendButton,
     session,
@@ -510,6 +540,10 @@ function renderAuthPanel() {
 
   if (panel) {
     panel.hidden = isAuthenticated;
+  }
+
+  if (firstNameField) {
+    firstNameField.hidden = authState.mode !== "register";
   }
 
   if (form) {
