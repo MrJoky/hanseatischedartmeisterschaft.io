@@ -6,6 +6,12 @@ import {
   onSnapshot,
   setDoc
 } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+import {
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut
+} from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
 import { firebaseConfig } from "./config.js";
 
 const BRACKET_DOC_PATH = ["publicState", "bracket"];
@@ -13,6 +19,13 @@ const RANKING_DOC_PATH = ["publicState", "ranking"];
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
+const authState = {
+  initialized: false,
+  listeners: new Set(),
+  ui: null,
+  user: null
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   initReveal();
@@ -21,6 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function initPage() {
   const page = document.body.dataset.page;
+
+  if (page === "bracket" || page === "ranking") {
+    initAuthPanel();
+  }
 
   if (page === "bracket") {
     initBracketPage();
@@ -54,6 +71,187 @@ function initReveal() {
   elements.forEach((element) => observer.observe(element));
 }
 
+function initAuthPanel() {
+  if (authState.ui) {
+    return authState.ui;
+  }
+
+  const pageMain = document.querySelector(".page-main");
+  const pageHero = pageMain?.querySelector(".page-hero");
+  if (!pageMain || !pageHero) {
+    return null;
+  }
+
+  const panel = document.createElement("section");
+  panel.className = "panel auth-panel";
+  panel.innerHTML = `
+    <div class="auth-panel-layout">
+      <div class="auth-copy">
+        <p class="eyebrow">Organizer Login</p>
+        <h2>Schreibzugriff bleibt unter Kontrolle.</h2>
+        <p>
+          Ranking und Turnierbaum bleiben sichtbar. Bearbeiten und Speichern ist
+          nur nach Anmeldung erlaubt.
+        </p>
+      </div>
+      <div class="auth-actions">
+        <form class="auth-form" data-auth-form>
+          <label class="auth-field">
+            <span>E-Mail</span>
+            <input class="auth-input" data-auth-email type="email" autocomplete="username" placeholder="orga@hdm.de" required />
+          </label>
+          <label class="auth-field">
+            <span>Passwort</span>
+            <input class="auth-input" data-auth-password type="password" autocomplete="current-password" placeholder="Passwort" required />
+          </label>
+          <button class="button button-primary" data-auth-submit type="submit">Anmelden</button>
+        </form>
+        <div class="auth-session" data-auth-session hidden>
+          <div class="auth-badge">
+            <span class="auth-badge-label">Angemeldet als</span>
+            <strong data-auth-user>Organisator</strong>
+          </div>
+          <button class="button button-secondary" data-auth-signout type="button">Abmelden</button>
+        </div>
+        <p class="auth-message" data-auth-message></p>
+      </div>
+    </div>
+  `;
+
+  pageHero.insertAdjacentElement("afterend", panel);
+
+  const form = panel.querySelector("[data-auth-form]");
+  const emailInput = panel.querySelector("[data-auth-email]");
+  const passwordInput = panel.querySelector("[data-auth-password]");
+  const session = panel.querySelector("[data-auth-session]");
+  const userLabel = panel.querySelector("[data-auth-user]");
+  const signOutButton = panel.querySelector("[data-auth-signout]");
+  const message = panel.querySelector("[data-auth-message]");
+
+  authState.ui = {
+    emailInput,
+    form,
+    message,
+    passwordInput,
+    session,
+    signOutButton,
+    userLabel
+  };
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    try {
+      setAuthMessage("Anmeldung wird geprüft...", "pending");
+      await signInWithEmailAndPassword(auth, emailInput?.value?.trim() || "", passwordInput?.value || "");
+      form.reset();
+    } catch (error) {
+      console.error(error);
+      setAuthMessage(getAuthErrorMessage(error), "error");
+    }
+  });
+
+  signOutButton?.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      setAuthMessage("Abgemeldet. Bearbeiten ist wieder gesperrt.", "info");
+    } catch (error) {
+      console.error(error);
+      setAuthMessage("Abmelden fehlgeschlagen. Bitte erneut versuchen.", "error");
+    }
+  });
+
+  if (!authState.initialized) {
+    authState.initialized = true;
+    onAuthStateChanged(auth, (user) => {
+      authState.user = user;
+      renderAuthPanel();
+      authState.listeners.forEach((listener) => listener(user));
+    });
+  }
+
+  renderAuthPanel();
+  return authState.ui;
+}
+
+function renderAuthPanel() {
+  if (!authState.ui) {
+    return;
+  }
+
+  const { form, session, userLabel } = authState.ui;
+  const user = authState.user;
+  const isAuthenticated = Boolean(user);
+
+  if (form) {
+    form.hidden = isAuthenticated;
+  }
+
+  if (session) {
+    session.hidden = !isAuthenticated;
+  }
+
+  if (userLabel) {
+    userLabel.textContent = user?.email || "Organisator";
+  }
+
+  setAuthMessage(
+    isAuthenticated
+      ? "Bearbeiten entsperrt. Änderungen werden wieder in Firestore gespeichert."
+      : "Nur angemeldete Organisatoren können Änderungen speichern.",
+    isAuthenticated ? "success" : "info"
+  );
+}
+
+function setAuthMessage(message, state = "info") {
+  if (!authState.ui?.message) {
+    return;
+  }
+
+  authState.ui.message.textContent = message;
+  authState.ui.message.dataset.state = state;
+}
+
+function getAuthErrorMessage(error) {
+  switch (error?.code) {
+    case "auth/configuration-not-found":
+      return "E-Mail/Passwort ist in Firebase Authentication noch nicht aktiviert.";
+    case "auth/invalid-credential":
+    case "auth/wrong-password":
+    case "auth/user-not-found":
+      return "E-Mail oder Passwort stimmen nicht.";
+    case "auth/invalid-email":
+      return "Die E-Mail-Adresse ist ungültig.";
+    case "auth/too-many-requests":
+      return "Zu viele Versuche. Bitte kurz warten und erneut anmelden.";
+    case "auth/network-request-failed":
+      return "Netzwerkfehler bei der Anmeldung. Verbindung prüfen und erneut versuchen.";
+    default:
+      return "Anmeldung fehlgeschlagen. Firebase Authentication bitte prüfen.";
+  }
+}
+
+function onEditorAccessChange(listener) {
+  authState.listeners.add(listener);
+  listener(authState.user);
+  return () => authState.listeners.delete(listener);
+}
+
+function hasEditorAccess() {
+  return Boolean(authState.user);
+}
+
+function requireEditorAccess(syncStatus) {
+  if (hasEditorAccess()) {
+    return true;
+  }
+
+  setAuthMessage("Bitte erst als Organisator anmelden.", "error");
+  setSyncStatus(syncStatus, "Nur Lesen aktiv. Zum Bearbeiten anmelden.", "pending");
+  authState.ui?.emailInput?.focus();
+  return false;
+}
+
 async function initBracketPage() {
   const syncStatus = document.getElementById("syncStatus");
   const bracketRef = doc(db, ...BRACKET_DOC_PATH);
@@ -61,13 +259,46 @@ async function initBracketPage() {
   const bracketRounds = document.getElementById("bracketRounds");
   const championName = document.getElementById("championName");
   const saveBracket = document.getElementById("saveBracket");
+  const resetBracket = document.getElementById("resetBracket");
   let state = createEmptyBracketState();
   let isApplyingRemote = false;
+  let canEdit = hasEditorAccess();
+
+  onEditorAccessChange((user) => {
+    canEdit = Boolean(user);
+
+    if (playersText) {
+      playersText.disabled = !canEdit;
+    }
+
+    if (saveBracket) {
+      saveBracket.disabled = !canEdit;
+    }
+
+    if (resetBracket) {
+      resetBracket.disabled = !canEdit;
+    }
+
+    renderBracketPage(state, playersText, bracketRounds, championName, {
+      editable: canEdit,
+      syncPlayersText: true
+    });
+  });
 
   setSyncStatus(syncStatus, "Cloud Sync verbindet...", "pending");
 
   onSnapshot(bracketRef, async (snapshot) => {
     if (!snapshot.exists()) {
+      if (!canEdit) {
+        state = createEmptyBracketState();
+        renderBracketPage(state, playersText, bracketRounds, championName, {
+          editable: canEdit,
+          syncPlayersText: true
+        });
+        setSyncStatus(syncStatus, "Cloud Sync leer. Zum Initialisieren anmelden.", "pending");
+        return;
+      }
+
       await writeBracketState(bracketRef, createEmptyBracketState());
       return;
     }
@@ -75,20 +306,30 @@ async function initBracketPage() {
     const remoteState = snapshot.data()?.state;
     isApplyingRemote = true;
     state = normalizeBracketState(remoteState);
-    renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
+    renderBracketPage(state, playersText, bracketRounds, championName, {
+      editable: canEdit,
+      syncPlayersText: true
+    });
     isApplyingRemote = false;
 
     if (needsBracketMigration(remoteState)) {
-      await writeBracketState(bracketRef, state);
+      if (canEdit) {
+        await writeBracketState(bracketRef, state);
+      }
     }
 
-    setSyncStatus(syncStatus, "Cloud Sync aktiv", "live");
+    setSyncStatus(syncStatus, canEdit ? "Cloud Sync aktiv" : "Cloud Sync aktiv. Nur Lesen.", "live");
   }, (error) => {
     console.error(error);
     setSyncStatus(syncStatus, "Cloud Sync fehlgeschlagen", "error");
   });
 
   playersText?.addEventListener("input", () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     if (isApplyingRemote) {
       return;
     }
@@ -97,6 +338,11 @@ async function initBracketPage() {
   });
 
   saveBracket?.addEventListener("click", async () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     if (isApplyingRemote || !playersText) {
       return;
     }
@@ -108,6 +354,11 @@ async function initBracketPage() {
   });
 
   bracketRounds?.addEventListener("input", (event) => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     if (isApplyingRemote) {
       return;
     }
@@ -132,9 +383,17 @@ async function initBracketPage() {
     awaitPushBracketState(bracketRef, state, syncStatus);
   });
 
-  document.getElementById("resetBracket")?.addEventListener("click", async () => {
+  resetBracket?.addEventListener("click", async () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     state = createEmptyBracketState();
-    renderBracketPage(state, playersText, bracketRounds, championName, { syncPlayersText: true });
+    renderBracketPage(state, playersText, bracketRounds, championName, {
+      editable: canEdit,
+      syncPlayersText: true
+    });
     setSyncStatus(syncStatus, "Leerer Baum wird gespeichert...", "pending");
     await pushImmediate(bracketRef, createBracketPayload(state), syncStatus, false);
   });
@@ -152,7 +411,10 @@ const awaitPushBracketState = debounce(async (ref, state, syncStatus) => {
 
 function renderBracketPage(state, playersTextElement, bracketRoundsElement, championNameElement, options = {}) {
   const bracket = buildBracketView(state);
-  const { syncPlayersText = false } = options;
+  const {
+    editable = true,
+    syncPlayersText = false
+  } = options;
 
   if (syncPlayersText && playersTextElement && playersTextElement.value !== bracket.playersText) {
     playersTextElement.value = bracket.playersText;
@@ -187,7 +449,7 @@ function renderBracketPage(state, playersTextElement, bracketRoundsElement, cham
               inputmode="numeric"
               placeholder="0"
               value="${match.scoreA}"
-              ${match.scoreDisabled ? "disabled" : ""}
+              ${!editable || match.scoreDisabled ? "disabled" : ""}
             />
           </div>
           <div class="player-row is-locked">
@@ -200,7 +462,7 @@ function renderBracketPage(state, playersTextElement, bracketRoundsElement, cham
               inputmode="numeric"
               placeholder="0"
               value="${match.scoreB}"
-              ${match.scoreDisabled ? "disabled" : ""}
+              ${!editable || match.scoreDisabled ? "disabled" : ""}
             />
           </div>
           <div class="match-result">${escapeHtml(match.resultLabel)}</div>
@@ -221,13 +483,35 @@ async function initRankingPage() {
   const syncStatus = document.getElementById("syncStatus");
   const rankingRef = doc(db, ...RANKING_DOC_PATH);
   const tableBody = document.getElementById("rankingBody");
+  const addRankingRow = document.getElementById("addRankingRow");
+  const importBracketPlayers = document.getElementById("importBracketPlayers");
+  const sortRanking = document.getElementById("sortRanking");
+  const resetRanking = document.getElementById("resetRanking");
   let state = [];
   let isApplyingRemote = false;
+  let canEdit = hasEditorAccess();
+
+  onEditorAccessChange((user) => {
+    canEdit = Boolean(user);
+    [addRankingRow, importBracketPlayers, sortRanking, resetRanking].forEach((element) => {
+      if (element) {
+        element.disabled = !canEdit;
+      }
+    });
+    renderRankingTable();
+  });
 
   setSyncStatus(syncStatus, "Cloud Sync verbindet...", "pending");
 
   onSnapshot(rankingRef, async (snapshot) => {
     if (!snapshot.exists()) {
+      if (!canEdit) {
+        state = [];
+        renderRankingTable();
+        setSyncStatus(syncStatus, "Cloud Sync leer. Zum Initialisieren anmelden.", "pending");
+        return;
+      }
+
       await setDoc(rankingRef, createRankingPayload([]), { merge: true });
       return;
     }
@@ -236,7 +520,7 @@ async function initRankingPage() {
     state = normalizeRankingState(snapshot.data()?.state);
     renderRankingTable();
     isApplyingRemote = false;
-    setSyncStatus(syncStatus, "Cloud Sync aktiv", "live");
+    setSyncStatus(syncStatus, canEdit ? "Cloud Sync aktiv" : "Cloud Sync aktiv. Nur Lesen.", "live");
   }, (error) => {
     console.error(error);
     setSyncStatus(syncStatus, "Cloud Sync fehlgeschlagen", "error");
@@ -252,28 +536,48 @@ async function initRankingPage() {
     }
   }, 500);
 
-  document.getElementById("addRankingRow")?.addEventListener("click", () => {
+  addRankingRow?.addEventListener("click", () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     state.push(createRankingRow());
     renderRankingTable();
     setSyncStatus(syncStatus, "Neuer Spieler wird synchronisiert...", "pending");
     pushRankingState();
   });
 
-  document.getElementById("sortRanking")?.addEventListener("click", () => {
+  sortRanking?.addEventListener("click", () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     state = sortRankingRows(state);
     renderRankingTable();
     setSyncStatus(syncStatus, "Ranking wird synchronisiert...", "pending");
     pushRankingState();
   });
 
-  document.getElementById("resetRanking")?.addEventListener("click", async () => {
+  resetRanking?.addEventListener("click", async () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     state = [];
     renderRankingTable();
     setSyncStatus(syncStatus, "Leeres Ranking wird gespeichert...", "pending");
     await pushImmediate(rankingRef, createRankingPayload(state), syncStatus);
   });
 
-  document.getElementById("importBracketPlayers")?.addEventListener("click", async () => {
+  importBracketPlayers?.addEventListener("click", async () => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     try {
       const bracketSnap = await getDoc(doc(db, ...BRACKET_DOC_PATH));
       const bracketState = normalizeBracketState(bracketSnap.data()?.state);
@@ -296,6 +600,11 @@ async function initRankingPage() {
   });
 
   tableBody?.addEventListener("input", (event) => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     if (isApplyingRemote) {
       return;
     }
@@ -322,6 +631,11 @@ async function initRankingPage() {
   });
 
   tableBody?.addEventListener("click", (event) => {
+    if (!canEdit) {
+      requireEditorAccess(syncStatus);
+      return;
+    }
+
     if (isApplyingRemote) {
       return;
     }
@@ -342,21 +656,23 @@ async function initRankingPage() {
       return;
     }
 
+    const disabled = canEdit ? "" : "disabled";
+
     tableBody.innerHTML = state.map((row, index) => {
       const diff = Number(row.legsFor) - Number(row.legsAgainst);
       return `
         <tr>
           <td><span class="rank-pill">${index + 1}</span></td>
-          <td><input class="table-input name" data-id="${row.id}" data-field="name" type="text" value="${escapeHtml(row.name)}" placeholder="Name" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="games" type="number" min="0" value="${row.games}" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="wins" type="number" min="0" value="${row.wins}" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="legsFor" type="number" min="0" value="${row.legsFor}" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="legsAgainst" type="number" min="0" value="${row.legsAgainst}" /></td>
+          <td><input class="table-input name" data-id="${row.id}" data-field="name" type="text" value="${escapeHtml(row.name)}" placeholder="Name" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="games" type="number" min="0" value="${row.games}" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="wins" type="number" min="0" value="${row.wins}" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="legsFor" type="number" min="0" value="${row.legsFor}" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="legsAgainst" type="number" min="0" value="${row.legsAgainst}" ${disabled} /></td>
           <td><span class="diff-pill" data-diff-id="${row.id}">${formatDiff(diff)}</span></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="oneEighty" type="number" min="0" value="${row.oneEighty}" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="average" type="number" step="0.1" min="0" value="${row.average}" /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="points" type="number" min="0" value="${row.points}" /></td>
-          <td><button class="icon-button" type="button" data-remove-id="${row.id}" aria-label="Spieler entfernen">×</button></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="oneEighty" type="number" min="0" value="${row.oneEighty}" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="average" type="number" step="0.1" min="0" value="${row.average}" ${disabled} /></td>
+          <td><input class="table-input" data-id="${row.id}" data-field="points" type="number" min="0" value="${row.points}" ${disabled} /></td>
+          <td><button class="icon-button" type="button" data-remove-id="${row.id}" aria-label="Spieler entfernen" ${disabled}>×</button></td>
         </tr>
       `;
     }).join("");
