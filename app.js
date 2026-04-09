@@ -50,6 +50,7 @@ function initPage() {
   if (page === "bracket" || page === "ranking") {
     initAuthPanel();
     initAdminPanel();
+    initNavAuth();
   }
 
   if (page === "bracket") {
@@ -110,6 +111,10 @@ function initAuthPanel() {
       <div class="auth-actions">
         <form class="auth-form" data-auth-form>
           <label class="auth-field">
+            <span>Vorname</span>
+            <input class="auth-input" data-auth-firstname type="text" autocomplete="given-name" placeholder="Kai" />
+          </label>
+          <label class="auth-field">
             <span>E-Mail</span>
             <input class="auth-input" data-auth-email type="email" autocomplete="username" placeholder="orga@hdm.de" required />
           </label>
@@ -131,7 +136,6 @@ function initAuthPanel() {
           <div class="auth-button-row">
             <button class="button button-secondary" data-auth-refresh type="button">Status aktualisieren</button>
             <button class="button button-secondary" data-auth-resend type="button">Verifizierung senden</button>
-            <button class="button button-secondary" data-auth-signout type="button">Abmelden</button>
           </div>
         </div>
         <p class="auth-message" data-auth-message></p>
@@ -143,6 +147,7 @@ function initAuthPanel() {
 
   const form = panel.querySelector("[data-auth-form]");
   const emailInput = panel.querySelector("[data-auth-email]");
+  const firstNameInput = panel.querySelector("[data-auth-firstname]");
   const passwordInput = panel.querySelector("[data-auth-password]");
   const refreshButton = panel.querySelector("[data-auth-refresh]");
   const registerButton = panel.querySelector("[data-auth-register]");
@@ -150,12 +155,12 @@ function initAuthPanel() {
   const session = panel.querySelector("[data-auth-session]");
   const sessionStatus = panel.querySelector("[data-auth-session-status]");
   const userLabel = panel.querySelector("[data-auth-user]");
-  const signOutButton = panel.querySelector("[data-auth-signout]");
   const message = panel.querySelector("[data-auth-message]");
 
   authState.ui = {
     emailInput,
     form,
+    firstNameInput,
     message,
     passwordInput,
     refreshButton,
@@ -163,7 +168,6 @@ function initAuthPanel() {
     resendButton,
     session,
     sessionStatus,
-    signOutButton,
     userLabel
   };
 
@@ -182,8 +186,23 @@ function initAuthPanel() {
 
   registerButton?.addEventListener("click", async () => {
     try {
+      const firstName = firstNameInput?.value?.trim() || "";
+      if (!firstName) {
+        setAuthMessage("Bitte beim Registrieren einen Vornamen angeben.", "error");
+        firstNameInput?.focus();
+        return;
+      }
+
       setAuthMessage("Konto wird erstellt...", "pending");
       const credential = await createUserWithEmailAndPassword(auth, emailInput?.value?.trim() || "", passwordInput?.value || "");
+      await setDoc(doc(db, EDITOR_ACCESS_COLLECTION, credential.user.uid), {
+        email: credential.user.email || "",
+        emailVerified: credential.user.emailVerified,
+        firstName,
+        requestedAt: new Date().toISOString(),
+        uid: credential.user.uid,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
       await sendEmailVerification(credential.user);
       setAuthMessage("Konto erstellt. Bitte E-Mail bestätigen und danach den Status aktualisieren.", "pending");
       form?.reset();
@@ -224,16 +243,6 @@ function initAuthPanel() {
     }
   });
 
-  signOutButton?.addEventListener("click", async () => {
-    try {
-      await signOut(auth);
-      setAuthMessage("Abgemeldet. Bearbeiten ist wieder gesperrt.", "info");
-    } catch (error) {
-      console.error(error);
-      setAuthMessage("Abmelden fehlgeschlagen. Bitte erneut versuchen.", "error");
-    }
-  });
-
   if (!authState.initialized) {
     authState.initialized = true;
     onAuthStateChanged(auth, (user) => {
@@ -243,6 +252,32 @@ function initAuthPanel() {
 
   renderAuthPanel();
   return authState.ui;
+}
+
+function initNavAuth() {
+  const nav = document.querySelector(".topbar .nav");
+  if (!nav || nav.querySelector("[data-nav-signout]")) {
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "nav-auth-button";
+  button.hidden = true;
+  button.dataset.navSignout = "true";
+  button.textContent = "Logout";
+
+  button.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      setAuthMessage("Abgemeldet. Bearbeiten ist wieder gesperrt.", "info");
+    } catch (error) {
+      console.error(error);
+      setAuthMessage("Abmelden fehlgeschlagen. Bitte erneut versuchen.", "error");
+    }
+  });
+
+  nav.append(button);
 }
 
 function initAdminPanel() {
@@ -361,7 +396,8 @@ function renderAdminPanel() {
     ? adminState.entries.map((entry) => `
         <article class="admin-card">
           <div class="admin-card-copy">
-            <strong>${escapeHtml(entry.email || "Unbekannter Nutzer")}</strong>
+            <strong>${escapeHtml(entry.firstName || "Ohne Vorname")}</strong>
+            <span>E-Mail: ${escapeHtml(entry.email || "Unbekannter Nutzer")}</span>
             <span>UID: ${escapeHtml(entry.uid || entry.id)}</span>
             <span>E-Mail bestätigt: ${entry.emailVerified ? "Ja" : "Nein"}</span>
             <span>Freigabe: ${entry.approved ? "Aktiv" : "Ausstehend"}</span>
@@ -467,6 +503,7 @@ function renderAuthPanel() {
   const isVerified = Boolean(user?.emailVerified);
   const isApproved = authState.access === "approved";
   const isCheckingApproval = authState.access === "checking";
+  const navSignOutButton = document.querySelector("[data-nav-signout]");
 
   if (form) {
     form.hidden = isAuthenticated;
@@ -477,7 +514,11 @@ function renderAuthPanel() {
   }
 
   if (userLabel) {
-    userLabel.textContent = user?.email || "Organisator";
+    userLabel.textContent = authState.accessRecord?.firstName || user?.email || "Organisator";
+  }
+
+  if (navSignOutButton) {
+    navSignOutButton.hidden = !isAuthenticated;
   }
 
   if (sessionStatus) {

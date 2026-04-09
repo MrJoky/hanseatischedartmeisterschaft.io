@@ -122,12 +122,14 @@ input {
 }
 
 .nav-link,
+.nav-auth-button,
 .button,
 .mini-panel {
   transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
-.nav-link {
+.nav-link,
+.nav-auth-button {
   padding: 12px 18px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -136,11 +138,16 @@ input {
 }
 
 .nav-link:hover,
-.nav-link.is-active {
+.nav-link.is-active,
+.nav-auth-button:hover {
   color: var(--text);
   transform: translateY(-1px);
   border-color: rgba(123, 247, 212, 0.45);
   background: linear-gradient(135deg, rgba(123, 247, 212, 0.18), rgba(100, 220, 255, 0.14));
+}
+
+.nav-auth-button {
+  cursor: pointer;
 }
 
 .panel {
