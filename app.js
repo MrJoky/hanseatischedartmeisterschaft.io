@@ -979,7 +979,9 @@ async function initRankingPage() {
   const historyList = document.getElementById("matchHistoryList");
   const playerOptions = document.getElementById("playerOptions");
   const matchForm = document.getElementById("matchForm");
+  const matchFormStatus = document.getElementById("matchFormStatus");
   const matchRound = document.getElementById("matchRound");
+  const matchRuleNote = document.getElementById("matchRuleNote");
   const matchPlayerA = document.getElementById("matchPlayerA");
   const matchPlayerB = document.getElementById("matchPlayerB");
   const matchRemainingA = document.getElementById("matchRemainingA");
@@ -1066,11 +1068,13 @@ async function initRankingPage() {
     event.preventDefault();
 
     if (!canEdit) {
+      setMatchFormStatus("Bearbeiten ist aktuell nicht freigegeben.", "error");
       requireEditorAccess(syncStatus);
       return;
     }
 
     try {
+      setMatchFormStatus("Match wird geprüft...", "pending");
       const nextMatch = createMatchRecord({
         averageA: matchAverageA?.value,
         averageB: matchAverageB?.value,
@@ -1089,6 +1093,7 @@ async function initRankingPage() {
       renderAll(nextMatches);
       setSyncStatus(syncStatus, "Match wird gespeichert...", "pending");
       await pushImmediate(matchHistoryRef, createMatchHistoryPayload(nextMatches), syncStatus);
+      setMatchFormStatus("Match gespeichert.", "success");
       matchForm.reset();
       if (matchRound) {
         matchRound.value = "Freies Spiel";
@@ -1096,6 +1101,7 @@ async function initRankingPage() {
       updateMatchFormMode();
     } catch (error) {
       console.error(error);
+      setMatchFormStatus(error?.message || "Match konnte nicht gespeichert werden.", "error");
       setSyncStatus(syncStatus, error?.message || "Match konnte nicht gespeichert werden.", "error");
     }
   });
@@ -1138,6 +1144,7 @@ async function initRankingPage() {
 
   function updateMatchFormMode() {
     const hasTimeLimit = getRoundTimeLimitMinutes(matchRound?.value) > 0;
+    const selectedRound = String(matchRound?.value || "Freies Spiel");
 
     if (matchDecider) {
       if (!hasTimeLimit) {
@@ -1149,9 +1156,25 @@ async function initRankingPage() {
         ? ""
         : "Bei Finalrunden ohne Zeitlimit wird kein Entscheidungswurf verwendet.";
     }
+
+    if (matchRuleNote) {
+      matchRuleNote.textContent = hasTimeLimit
+        ? `${selectedRound}: 12 Minuten Zeitlimit. Bei Gleichstand bitte den Entscheidungswurf auswählen.`
+        : `${selectedRound}: kein Zeitlimit. Bitte den Sieger mit 0 Restpunkten eintragen.`;
+    }
   }
 
   updateMatchFormMode();
+
+  function setMatchFormStatus(message = "", state = "info") {
+    if (!matchFormStatus) {
+      return;
+    }
+
+    matchFormStatus.textContent = message;
+    matchFormStatus.dataset.state = state;
+    matchFormStatus.hidden = !message;
+  }
 
   function renderPlayerOptions(nextMatches = matches) {
     if (!playerOptions) {
