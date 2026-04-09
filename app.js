@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
 import {
+  collection,
   doc,
   getDoc,
   getFirestore,
@@ -17,16 +18,25 @@ import {
 import { firebaseConfig } from "./config.js";
 
 const BRACKET_DOC_PATH = ["publicState", "bracket"];
+const EDITOR_ACCESS_COLLECTION = "editorAccess";
 const RANKING_DOC_PATH = ["publicState", "ranking"];
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 const authState = {
+  access: "signed_out",
+  accessRecord: null,
   initialized: false,
   listeners: new Set(),
   ui: null,
   user: null
+};
+const adminState = {
+  entries: [],
+  status: "",
+  ui: null,
+  unsubscribe: null
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -39,6 +49,7 @@ function initPage() {
 
   if (page === "bracket" || page === "ranking") {
     initAuthPanel();
+    initAdminPanel();
   }
 
   if (page === "bracket") {
@@ -190,6 +201,7 @@ function initAuthPanel() {
 
       setAuthMessage("Anmeldestatus wird aktualisiert...", "pending");
       await auth.currentUser.reload();
+      await auth.currentUser.getIdToken(true);
       syncAuthState(auth.currentUser);
     } catch (error) {
       console.error(error);
@@ -233,10 +245,209 @@ function initAuthPanel() {
   return authState.ui;
 }
 
-function syncAuthState(user) {
+function initAdminPanel() {
+  if (adminState.ui) {
+    return adminState.ui;
+  }
+
+  const pageMain = document.querySelector(".page-main");
+  if (!pageMain) {
+    return null;
+  }
+
+  const panel = document.createElement("section");
+  panel.className = "panel admin-panel";
+  panel.hidden = true;
+  panel.innerHTML = `
+    <div class="admin-panel-head">
+      <div>
+        <p class="eyebrow">Adminbereich</p>
+        <h2>Freigaben mit zwei Klicks.</h2>
+        <p class="admin-copy">
+          Hier erscheinen alle Freigabe-Anfragen aus <code>editorAccess</code>.
+          Du kannst Nutzer direkt freigeben oder wieder sperren.
+        </p>
+      </div>
+      <p class="admin-status" data-admin-status></p>
+    </div>
+    <div class="admin-list" data-admin-list></div>
+  `;
+
+  pageMain.append(panel);
+
+  const list = panel.querySelector("[data-admin-list]");
+  const status = panel.querySelector("[data-admin-status]");
+
+  adminState.ui = {
+    list,
+    panel,
+    status
+  };
+
+  list?.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.userId) {
+      return;
+    }
+
+    const approved = target.dataset.approved === "true";
+
+    try {
+      setAdminStatus("Freigabe wird gespeichert...", "pending");
+      await setDoc(doc(db, EDITOR_ACCESS_COLLECTION, target.dataset.userId), {
+        approved,
+        reviewedAt: new Date().toISOString()
+      }, { merge: true });
+      setAdminStatus(approved ? "Nutzer freigegeben." : "Freigabe entzogen.", "success");
+    } catch (error) {
+      console.error(error);
+      setAdminStatus("Freigabe konnte nicht gespeichert werden.", "error");
+    }
+  });
+
+  renderAdminPanel();
+  return adminState.ui;
+}
+
+function startAdminAccessMonitor() {
+  if (adminState.unsubscribe) {
+    return;
+  }
+
+  setAdminStatus("Freigaben werden geladen...", "pending");
+  adminState.unsubscribe = onSnapshot(collection(db, EDITOR_ACCESS_COLLECTION), (snapshot) => {
+    adminState.entries = snapshot.docs
+      .map((entry) => ({ id: entry.id, ...entry.data() }))
+      .sort(compareAccessEntries);
+    setAdminStatus("Freigaben aktuell.", "success");
+    renderAdminPanel();
+  }, (error) => {
+    console.error(error);
+    setAdminStatus("Freigaben konnten nicht geladen werden.", "error");
+    renderAdminPanel();
+  });
+}
+
+function stopAdminAccessMonitor() {
+  if (adminState.unsubscribe) {
+    adminState.unsubscribe();
+    adminState.unsubscribe = null;
+  }
+
+  adminState.entries = [];
+  adminState.status = "";
+  renderAdminPanel();
+}
+
+function compareAccessEntries(left, right) {
+  const leftTime = String(left.updatedAt || left.requestedAt || "");
+  const rightTime = String(right.updatedAt || right.requestedAt || "");
+  return rightTime.localeCompare(leftTime);
+}
+
+function renderAdminPanel() {
+  if (!adminState.ui) {
+    return;
+  }
+
+  const isAdmin = authState.accessRecord?.admin === true;
+  adminState.ui.panel.hidden = !isAdmin;
+
+  if (!isAdmin) {
+    return;
+  }
+
+  adminState.ui.list.innerHTML = adminState.entries.length
+    ? adminState.entries.map((entry) => `
+        <article class="admin-card">
+          <div class="admin-card-copy">
+            <strong>${escapeHtml(entry.email || "Unbekannter Nutzer")}</strong>
+            <span>UID: ${escapeHtml(entry.uid || entry.id)}</span>
+            <span>E-Mail bestätigt: ${entry.emailVerified ? "Ja" : "Nein"}</span>
+            <span>Freigabe: ${entry.approved ? "Aktiv" : "Ausstehend"}</span>
+            <span>Admin: ${entry.admin ? "Ja" : "Nein"}</span>
+          </div>
+          <div class="admin-card-actions">
+            <button class="button button-primary" type="button" data-user-id="${entry.id}" data-approved="true" ${entry.approved ? "disabled" : ""}>Freigeben</button>
+            <button class="button button-secondary" type="button" data-user-id="${entry.id}" data-approved="false" ${!entry.approved ? "disabled" : ""}>Sperren</button>
+          </div>
+        </article>
+      `).join("")
+    : `<p class="admin-empty">Noch keine Freigabe-Anfragen vorhanden.</p>`;
+}
+
+function setAdminStatus(message = "", state = "info") {
+  adminState.status = message;
+
+  if (!adminState.ui?.status) {
+    return;
+  }
+
+  adminState.ui.status.textContent = message;
+  adminState.ui.status.dataset.state = state;
+}
+
+async function syncAuthState(user) {
   authState.user = user;
+  authState.accessRecord = null;
+
+  if (!user) {
+    authState.access = "signed_out";
+    stopAdminAccessMonitor();
+    renderAuthPanel();
+    renderAdminPanel();
+    authState.listeners.forEach((listener) => listener(user));
+    return;
+  }
+
+  await ensureOwnAccessRequest(user);
+
+  if (!user.emailVerified) {
+    authState.access = "unverified";
+    stopAdminAccessMonitor();
+    renderAuthPanel();
+    renderAdminPanel();
+    authState.listeners.forEach((listener) => listener(user));
+    return;
+  }
+
+  authState.access = "checking";
   renderAuthPanel();
+  renderAdminPanel();
   authState.listeners.forEach((listener) => listener(user));
+
+  try {
+    const accessSnap = await getDoc(doc(db, EDITOR_ACCESS_COLLECTION, user.uid));
+    authState.accessRecord = accessSnap.exists() ? accessSnap.data() : null;
+    authState.access = authState.accessRecord?.approved === true ? "approved" : "pending";
+  } catch (error) {
+    console.error(error);
+    authState.access = "pending";
+  }
+
+  if (authState.accessRecord?.admin === true) {
+    startAdminAccessMonitor();
+  } else {
+    stopAdminAccessMonitor();
+  }
+
+  renderAuthPanel();
+  renderAdminPanel();
+  authState.listeners.forEach((listener) => listener(user));
+}
+
+async function ensureOwnAccessRequest(user) {
+  try {
+    await setDoc(doc(db, EDITOR_ACCESS_COLLECTION, user.uid), {
+      email: user.email || "",
+      emailVerified: user.emailVerified,
+      requestedAt: new Date().toISOString(),
+      uid: user.uid,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function renderAuthPanel() {
@@ -254,6 +465,8 @@ function renderAuthPanel() {
   const user = authState.user;
   const isAuthenticated = Boolean(user);
   const isVerified = Boolean(user?.emailVerified);
+  const isApproved = authState.access === "approved";
+  const isCheckingApproval = authState.access === "checking";
 
   if (form) {
     form.hidden = isAuthenticated;
@@ -270,10 +483,20 @@ function renderAuthPanel() {
   if (sessionStatus) {
     sessionStatus.textContent = !user
       ? ""
-      : isVerified
-        ? "E-Mail bestätigt. Schreibzugriff wird aktiv, sobald du in Firebase freigeschaltet wurdest."
-        : "E-Mail noch nicht bestätigt. Bitte Link im Postfach öffnen und danach den Status aktualisieren.";
-    sessionStatus.dataset.state = isVerified ? "success" : "pending";
+      : !isVerified
+        ? "E-Mail noch nicht bestätigt. Bitte Link im Postfach öffnen und danach den Status aktualisieren."
+        : isCheckingApproval
+          ? "Freigabe wird geprüft..."
+          : isApproved
+            ? "E-Mail bestätigt und in Firebase freigegeben. Schreiben ist jetzt erlaubt."
+            : "E-Mail bestätigt. Schreibzugriff ist noch nicht freigegeben.";
+    sessionStatus.dataset.state = !user
+      ? "info"
+      : !isVerified
+        ? "pending"
+        : isApproved
+          ? "success"
+          : "pending";
   }
 
   if (resendButton) {
@@ -283,10 +506,20 @@ function renderAuthPanel() {
   setAuthMessage(
     !isAuthenticated
       ? "Registriere dich oder melde dich mit einem vorhandenen Organizer-Konto an."
-      : isVerified
-        ? "Anmeldung aktiv. Wenn Speichern noch blockiert ist, fehlt nur noch die Freigabe in Firebase."
-        : "Konto aktiv. Bitte erst E-Mail bestätigen, bevor Schreiben möglich ist.",
-    isAuthenticated ? (isVerified ? "success" : "pending") : "info"
+      : !isVerified
+        ? "Konto aktiv. Bitte erst E-Mail bestätigen, bevor Schreiben möglich ist."
+        : isCheckingApproval
+          ? "E-Mail bestätigt. Freigabe in Firebase wird gerade geprüft."
+          : isApproved
+            ? "Bearbeiten entsperrt. Änderungen werden wieder in Firestore gespeichert."
+            : "E-Mail bestätigt. Jetzt fehlt nur noch deine Freigabe in Firebase.",
+    !isAuthenticated
+      ? "info"
+      : !isVerified
+        ? "pending"
+        : isApproved
+          ? "success"
+          : "pending"
   );
 }
 
@@ -329,7 +562,7 @@ function onEditorAccessChange(listener) {
 }
 
 function hasEditorAccess() {
-  return Boolean(authState.user?.emailVerified);
+  return authState.access === "approved";
 }
 
 function requireEditorAccess(syncStatus) {
@@ -342,9 +575,12 @@ function requireEditorAccess(syncStatus) {
   if (!user) {
     setAuthMessage("Bitte erst anmelden oder registrieren.", "error");
     setSyncStatus(syncStatus, "Nur Lesen aktiv. Zum Bearbeiten anmelden.", "pending");
-  } else {
+  } else if (!user.emailVerified) {
     setAuthMessage("Bitte erst E-Mail bestätigen und danach den Status aktualisieren.", "error");
     setSyncStatus(syncStatus, "Nur Lesen aktiv. E-Mail-Bestätigung fehlt.", "pending");
+  } else {
+    setAuthMessage("E-Mail bestätigt. Es fehlt noch die Freigabe in Firebase.", "error");
+    setSyncStatus(syncStatus, "Nur Lesen aktiv. Konto noch nicht freigegeben.", "pending");
   }
 
   authState.ui?.emailInput?.focus();
@@ -389,8 +625,8 @@ async function initBracketPage() {
   let isApplyingRemote = false;
   let canEdit = hasEditorAccess();
 
-  onEditorAccessChange((user) => {
-    canEdit = Boolean(user?.emailVerified);
+  onEditorAccessChange(() => {
+    canEdit = hasEditorAccess();
 
     if (playersText) {
       playersText.disabled = !canEdit;
@@ -623,8 +859,8 @@ async function initRankingPage() {
   let isApplyingRemote = false;
   let canEdit = hasEditorAccess();
 
-  onEditorAccessChange((user) => {
-    canEdit = Boolean(user?.emailVerified);
+  onEditorAccessChange(() => {
+    canEdit = hasEditorAccess();
     [addRankingRow, importBracketPlayers, sortRanking, resetRanking].forEach((element) => {
       if (element) {
         element.disabled = !canEdit;
