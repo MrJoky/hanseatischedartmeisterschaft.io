@@ -101,12 +101,11 @@ function initAuthPanel() {
   panel.className = "panel auth-panel";
   panel.innerHTML = `
     <div class="auth-panel-layout">
-      <div class="auth-copy">
+      <div class="auth-copy" data-auth-copy>
         <p class="eyebrow">Organizer Login</p>
-        <h2>Schreibzugriff bleibt unter Kontrolle.</h2>
+        <h2>Organizer Zugang</h2>
         <p>
-          Ranking und Turnierbaum bleiben sichtbar. Bearbeiten und Speichern ist
-          nur nach Anmeldung erlaubt.
+          Anmeldung und Freigaben nur fuer die Verwaltung.
         </p>
       </div>
       <div class="auth-actions">
@@ -147,6 +146,7 @@ function initAuthPanel() {
   pageHero.insertAdjacentElement("afterend", panel);
 
   const form = panel.querySelector("[data-auth-form]");
+  const authCopy = panel.querySelector("[data-auth-copy]");
   const emailInput = panel.querySelector("[data-auth-email]");
   const firstNameField = panel.querySelector("[data-auth-firstname-field]");
   const firstNameInput = panel.querySelector("[data-auth-firstname]");
@@ -160,6 +160,7 @@ function initAuthPanel() {
   const message = panel.querySelector("[data-auth-message]");
 
   authState.ui = {
+    authCopy,
     emailInput,
     form,
     firstNameField,
@@ -500,6 +501,7 @@ async function syncAuthState(user) {
 
   renderAuthPanel();
   renderAdminPanel();
+  updateStatusVisibility();
   authState.listeners.forEach((listener) => listener(user));
 }
 
@@ -523,6 +525,7 @@ function renderAuthPanel() {
   }
 
   const {
+    authCopy,
     form,
     firstNameField,
     panel,
@@ -536,11 +539,14 @@ function renderAuthPanel() {
   const isVerified = Boolean(user?.emailVerified);
   const isApproved = authState.access === "approved";
   const isCheckingApproval = authState.access === "checking";
+  const isAdmin = isAdminUser();
   const navSignOutButton = document.querySelector("[data-nav-signout]");
 
   if (panel) {
     panel.hidden = isAuthenticated;
   }
+
+  setElementVisibility(authCopy, isAdmin);
 
   if (firstNameField) {
     firstNameField.hidden = authState.mode !== "register";
@@ -563,6 +569,7 @@ function renderAuthPanel() {
   }
 
   if (sessionStatus) {
+    sessionStatus.hidden = !isAdmin || !isAuthenticated;
     sessionStatus.textContent = !user
       ? ""
       : !isVerified
@@ -585,24 +592,30 @@ function renderAuthPanel() {
     resendButton.hidden = !isAuthenticated || isVerified;
   }
 
-  setAuthMessage(
-    !isAuthenticated
-      ? "Registriere dich oder melde dich mit einem vorhandenen Organizer-Konto an."
-      : !isVerified
-        ? "Konto aktiv. Bitte erst E-Mail bestätigen, bevor Schreiben möglich ist."
-        : isCheckingApproval
-          ? "E-Mail bestätigt. Freigabe in Firebase wird gerade geprüft."
+  if (isAdmin) {
+    setAuthMessage(
+      !isAuthenticated
+        ? "Registriere dich oder melde dich mit einem vorhandenen Organizer-Konto an."
+        : !isVerified
+          ? "Konto aktiv. Bitte erst E-Mail bestätigen, bevor Schreiben möglich ist."
+          : isCheckingApproval
+            ? "E-Mail bestätigt. Freigabe in Firebase wird gerade geprüft."
+            : isApproved
+              ? "Bearbeiten entsperrt. Änderungen werden wieder in Firestore gespeichert."
+              : "E-Mail bestätigt. Jetzt fehlt nur noch deine Freigabe in Firebase.",
+      !isAuthenticated
+        ? "info"
+        : !isVerified
+          ? "pending"
           : isApproved
-            ? "Bearbeiten entsperrt. Änderungen werden wieder in Firestore gespeichert."
-            : "E-Mail bestätigt. Jetzt fehlt nur noch deine Freigabe in Firebase.",
-    !isAuthenticated
-      ? "info"
-      : !isVerified
-        ? "pending"
-        : isApproved
-          ? "success"
-          : "pending"
-  );
+            ? "success"
+            : "pending"
+    );
+  } else {
+    setAuthMessage("", "info");
+  }
+
+  updateStatusVisibility();
 }
 
 function setAuthMessage(message, state = "info") {
@@ -612,6 +625,7 @@ function setAuthMessage(message, state = "info") {
 
   authState.ui.message.textContent = message;
   authState.ui.message.dataset.state = state;
+  authState.ui.message.hidden = !message || !isAdminUser();
 }
 
 function getAuthErrorMessage(error) {
@@ -645,6 +659,33 @@ function onEditorAccessChange(listener) {
 
 function hasEditorAccess() {
   return authState.access === "approved";
+}
+
+function isAdminUser() {
+  return authState.accessRecord?.admin === true;
+}
+
+function setElementVisibility(element, visible) {
+  if (!element) {
+    return;
+  }
+
+  element.hidden = !visible;
+}
+
+function updateStatusVisibility() {
+  const isAdmin = isAdminUser();
+  const syncStatus = document.getElementById("syncStatus");
+
+  setElementVisibility(syncStatus, isAdmin);
+
+  if (!authState.ui) {
+    return;
+  }
+
+  setElementVisibility(authState.ui.authCopy, isAdmin);
+  setElementVisibility(authState.ui.message, isAdmin && !Boolean(authState.user));
+  setElementVisibility(authState.ui.sessionStatus, isAdmin && Boolean(authState.user));
 }
 
 function requireEditorAccess(syncStatus) {
