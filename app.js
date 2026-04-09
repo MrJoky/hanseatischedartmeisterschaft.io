@@ -162,6 +162,7 @@ function initAuthPanel() {
     form,
     firstNameInput,
     message,
+    panel,
     passwordInput,
     refreshButton,
     registerButton,
@@ -271,6 +272,7 @@ function initNavAuth() {
     try {
       await signOut(auth);
       setAuthMessage("Abgemeldet. Bearbeiten ist wieder gesperrt.", "info");
+      window.location.reload();
     } catch (error) {
       console.error(error);
       setAuthMessage("Abmelden fehlgeschlagen. Bitte erneut versuchen.", "error");
@@ -493,6 +495,7 @@ function renderAuthPanel() {
 
   const {
     form,
+    panel,
     resendButton,
     session,
     sessionStatus,
@@ -504,6 +507,10 @@ function renderAuthPanel() {
   const isApproved = authState.access === "approved";
   const isCheckingApproval = authState.access === "checking";
   const navSignOutButton = document.querySelector("[data-nav-signout]");
+
+  if (panel) {
+    panel.hidden = isAuthenticated;
+  }
 
   if (form) {
     form.hidden = isAuthenticated;
