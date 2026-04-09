@@ -7,8 +7,10 @@ import {
   setDoc
 } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
 import {
+  createUserWithEmailAndPassword,
   getAuth,
   onAuthStateChanged,
+  sendEmailVerification,
   signInWithEmailAndPassword,
   signOut
 } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
@@ -104,14 +106,22 @@ function initAuthPanel() {
             <span>Passwort</span>
             <input class="auth-input" data-auth-password type="password" autocomplete="current-password" placeholder="Passwort" required />
           </label>
-          <button class="button button-primary" data-auth-submit type="submit">Anmelden</button>
+          <div class="auth-button-row">
+            <button class="button button-primary" data-auth-submit type="submit">Anmelden</button>
+            <button class="button button-secondary" data-auth-register type="button">Registrieren</button>
+          </div>
         </form>
         <div class="auth-session" data-auth-session hidden>
           <div class="auth-badge">
             <span class="auth-badge-label">Angemeldet als</span>
             <strong data-auth-user>Organisator</strong>
           </div>
-          <button class="button button-secondary" data-auth-signout type="button">Abmelden</button>
+          <p class="auth-session-status" data-auth-session-status></p>
+          <div class="auth-button-row">
+            <button class="button button-secondary" data-auth-refresh type="button">Status aktualisieren</button>
+            <button class="button button-secondary" data-auth-resend type="button">Verifizierung senden</button>
+            <button class="button button-secondary" data-auth-signout type="button">Abmelden</button>
+          </div>
         </div>
         <p class="auth-message" data-auth-message></p>
       </div>
@@ -123,7 +133,11 @@ function initAuthPanel() {
   const form = panel.querySelector("[data-auth-form]");
   const emailInput = panel.querySelector("[data-auth-email]");
   const passwordInput = panel.querySelector("[data-auth-password]");
+  const refreshButton = panel.querySelector("[data-auth-refresh]");
+  const registerButton = panel.querySelector("[data-auth-register]");
+  const resendButton = panel.querySelector("[data-auth-resend]");
   const session = panel.querySelector("[data-auth-session]");
+  const sessionStatus = panel.querySelector("[data-auth-session-status]");
   const userLabel = panel.querySelector("[data-auth-user]");
   const signOutButton = panel.querySelector("[data-auth-signout]");
   const message = panel.querySelector("[data-auth-message]");
@@ -133,7 +147,11 @@ function initAuthPanel() {
     form,
     message,
     passwordInput,
+    refreshButton,
+    registerButton,
+    resendButton,
     session,
+    sessionStatus,
     signOutButton,
     userLabel
   };
@@ -145,6 +163,49 @@ function initAuthPanel() {
       setAuthMessage("Anmeldung wird geprüft...", "pending");
       await signInWithEmailAndPassword(auth, emailInput?.value?.trim() || "", passwordInput?.value || "");
       form.reset();
+    } catch (error) {
+      console.error(error);
+      setAuthMessage(getAuthErrorMessage(error), "error");
+    }
+  });
+
+  registerButton?.addEventListener("click", async () => {
+    try {
+      setAuthMessage("Konto wird erstellt...", "pending");
+      const credential = await createUserWithEmailAndPassword(auth, emailInput?.value?.trim() || "", passwordInput?.value || "");
+      await sendEmailVerification(credential.user);
+      setAuthMessage("Konto erstellt. Bitte E-Mail bestätigen und danach den Status aktualisieren.", "pending");
+      form?.reset();
+    } catch (error) {
+      console.error(error);
+      setAuthMessage(getAuthErrorMessage(error), "error");
+    }
+  });
+
+  refreshButton?.addEventListener("click", async () => {
+    try {
+      if (!auth.currentUser) {
+        return;
+      }
+
+      setAuthMessage("Anmeldestatus wird aktualisiert...", "pending");
+      await auth.currentUser.reload();
+      syncAuthState(auth.currentUser);
+    } catch (error) {
+      console.error(error);
+      setAuthMessage("Status konnte nicht aktualisiert werden. Bitte erneut versuchen.", "error");
+    }
+  });
+
+  resendButton?.addEventListener("click", async () => {
+    try {
+      if (!auth.currentUser) {
+        return;
+      }
+
+      setAuthMessage("Verifizierungs-Mail wird gesendet...", "pending");
+      await sendEmailVerification(auth.currentUser);
+      setAuthMessage("Verifizierungs-Mail versendet. Bitte Postfach prüfen.", "pending");
     } catch (error) {
       console.error(error);
       setAuthMessage(getAuthErrorMessage(error), "error");
@@ -164,9 +225,7 @@ function initAuthPanel() {
   if (!authState.initialized) {
     authState.initialized = true;
     onAuthStateChanged(auth, (user) => {
-      authState.user = user;
-      renderAuthPanel();
-      authState.listeners.forEach((listener) => listener(user));
+      syncAuthState(user);
     });
   }
 
@@ -174,14 +233,27 @@ function initAuthPanel() {
   return authState.ui;
 }
 
+function syncAuthState(user) {
+  authState.user = user;
+  renderAuthPanel();
+  authState.listeners.forEach((listener) => listener(user));
+}
+
 function renderAuthPanel() {
   if (!authState.ui) {
     return;
   }
 
-  const { form, session, userLabel } = authState.ui;
+  const {
+    form,
+    resendButton,
+    session,
+    sessionStatus,
+    userLabel
+  } = authState.ui;
   const user = authState.user;
   const isAuthenticated = Boolean(user);
+  const isVerified = Boolean(user?.emailVerified);
 
   if (form) {
     form.hidden = isAuthenticated;
@@ -195,11 +267,26 @@ function renderAuthPanel() {
     userLabel.textContent = user?.email || "Organisator";
   }
 
+  if (sessionStatus) {
+    sessionStatus.textContent = !user
+      ? ""
+      : isVerified
+        ? "E-Mail bestätigt. Schreibzugriff wird aktiv, sobald du in Firebase freigeschaltet wurdest."
+        : "E-Mail noch nicht bestätigt. Bitte Link im Postfach öffnen und danach den Status aktualisieren.";
+    sessionStatus.dataset.state = isVerified ? "success" : "pending";
+  }
+
+  if (resendButton) {
+    resendButton.hidden = !isAuthenticated || isVerified;
+  }
+
   setAuthMessage(
-    isAuthenticated
-      ? "Bearbeiten entsperrt. Änderungen werden wieder in Firestore gespeichert."
-      : "Nur angemeldete Organisatoren können Änderungen speichern.",
-    isAuthenticated ? "success" : "info"
+    !isAuthenticated
+      ? "Registriere dich oder melde dich mit einem vorhandenen Organizer-Konto an."
+      : isVerified
+        ? "Anmeldung aktiv. Wenn Speichern noch blockiert ist, fehlt nur noch die Freigabe in Firebase."
+        : "Konto aktiv. Bitte erst E-Mail bestätigen, bevor Schreiben möglich ist.",
+    isAuthenticated ? (isVerified ? "success" : "pending") : "info"
   );
 }
 
@@ -216,12 +303,16 @@ function getAuthErrorMessage(error) {
   switch (error?.code) {
     case "auth/configuration-not-found":
       return "E-Mail/Passwort ist in Firebase Authentication noch nicht aktiviert.";
+    case "auth/email-already-in-use":
+      return "Für diese E-Mail existiert bereits ein Konto. Bitte anmelden.";
     case "auth/invalid-credential":
     case "auth/wrong-password":
     case "auth/user-not-found":
       return "E-Mail oder Passwort stimmen nicht.";
     case "auth/invalid-email":
       return "Die E-Mail-Adresse ist ungültig.";
+    case "auth/weak-password":
+      return "Das Passwort ist zu schwach. Bitte mindestens 6 Zeichen verwenden.";
     case "auth/too-many-requests":
       return "Zu viele Versuche. Bitte kurz warten und erneut anmelden.";
     case "auth/network-request-failed":
@@ -238,18 +329,52 @@ function onEditorAccessChange(listener) {
 }
 
 function hasEditorAccess() {
-  return Boolean(authState.user);
+  return Boolean(authState.user?.emailVerified);
 }
 
 function requireEditorAccess(syncStatus) {
+  const user = authState.user;
+
   if (hasEditorAccess()) {
     return true;
   }
 
-  setAuthMessage("Bitte erst als Organisator anmelden.", "error");
-  setSyncStatus(syncStatus, "Nur Lesen aktiv. Zum Bearbeiten anmelden.", "pending");
+  if (!user) {
+    setAuthMessage("Bitte erst anmelden oder registrieren.", "error");
+    setSyncStatus(syncStatus, "Nur Lesen aktiv. Zum Bearbeiten anmelden.", "pending");
+  } else {
+    setAuthMessage("Bitte erst E-Mail bestätigen und danach den Status aktualisieren.", "error");
+    setSyncStatus(syncStatus, "Nur Lesen aktiv. E-Mail-Bestätigung fehlt.", "pending");
+  }
+
   authState.ui?.emailInput?.focus();
   return false;
+}
+
+function getWriteAccessMessage(error) {
+  if (error?.code !== "permission-denied") {
+    return null;
+  }
+
+  if (!authState.user) {
+    return "Schreiben gesperrt. Bitte erst anmelden.";
+  }
+
+  if (!authState.user.emailVerified) {
+    return "Schreiben gesperrt. Bitte erst E-Mail bestätigen und den Status aktualisieren.";
+  }
+
+  return "Schreiben gesperrt. Dein Konto ist noch nicht in Firebase freigegeben.";
+}
+
+function handleWriteError(error, syncStatus, fallbackMessage = "Speichern fehlgeschlagen") {
+  console.error(error);
+  const message = getWriteAccessMessage(error) || fallbackMessage;
+  setSyncStatus(syncStatus, message, "error");
+
+  if (getWriteAccessMessage(error)) {
+    setAuthMessage(message, "error");
+  }
 }
 
 async function initBracketPage() {
@@ -265,7 +390,7 @@ async function initBracketPage() {
   let canEdit = hasEditorAccess();
 
   onEditorAccessChange((user) => {
-    canEdit = Boolean(user);
+    canEdit = Boolean(user?.emailVerified);
 
     if (playersText) {
       playersText.disabled = !canEdit;
@@ -299,7 +424,11 @@ async function initBracketPage() {
         return;
       }
 
-      await writeBracketState(bracketRef, createEmptyBracketState());
+      try {
+        await writeBracketState(bracketRef, createEmptyBracketState());
+      } catch (error) {
+        handleWriteError(error, syncStatus);
+      }
       return;
     }
 
@@ -314,7 +443,11 @@ async function initBracketPage() {
 
     if (needsBracketMigration(remoteState)) {
       if (canEdit) {
-        await writeBracketState(bracketRef, state);
+        try {
+          await writeBracketState(bracketRef, state);
+        } catch (error) {
+          handleWriteError(error, syncStatus);
+        }
       }
     }
 
@@ -404,8 +537,7 @@ const awaitPushBracketState = debounce(async (ref, state, syncStatus) => {
     await writeBracketState(ref, state);
     setSyncStatus(syncStatus, "Gespeichert", "live");
   } catch (error) {
-    console.error(error);
-    setSyncStatus(syncStatus, "Speichern fehlgeschlagen", "error");
+    handleWriteError(error, syncStatus);
   }
 }, 500);
 
@@ -492,7 +624,7 @@ async function initRankingPage() {
   let canEdit = hasEditorAccess();
 
   onEditorAccessChange((user) => {
-    canEdit = Boolean(user);
+    canEdit = Boolean(user?.emailVerified);
     [addRankingRow, importBracketPlayers, sortRanking, resetRanking].forEach((element) => {
       if (element) {
         element.disabled = !canEdit;
@@ -512,7 +644,11 @@ async function initRankingPage() {
         return;
       }
 
-      await setDoc(rankingRef, createRankingPayload([]), { merge: true });
+      try {
+        await setDoc(rankingRef, createRankingPayload([]), { merge: true });
+      } catch (error) {
+        handleWriteError(error, syncStatus);
+      }
       return;
     }
 
@@ -531,8 +667,7 @@ async function initRankingPage() {
       await setDoc(rankingRef, createRankingPayload(state), { merge: true });
       setSyncStatus(syncStatus, "Gespeichert", "live");
     } catch (error) {
-      console.error(error);
-      setSyncStatus(syncStatus, "Speichern fehlgeschlagen", "error");
+      handleWriteError(error, syncStatus);
     }
   }, 500);
 
@@ -1203,8 +1338,7 @@ async function pushImmediate(ref, payload, syncStatus, merge = true) {
 
     setSyncStatus(syncStatus, "Gespeichert", "live");
   } catch (error) {
-    console.error(error);
-    setSyncStatus(syncStatus, "Speichern fehlgeschlagen", "error");
+    handleWriteError(error, syncStatus);
   }
 }
 

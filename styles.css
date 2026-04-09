@@ -474,6 +474,12 @@ input {
   gap: 12px;
 }
 
+.auth-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .auth-field {
   display: grid;
   gap: 8px;
@@ -516,6 +522,20 @@ input {
   min-height: 22px;
   margin: 0;
   color: var(--muted);
+}
+
+.auth-session-status {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-session-status[data-state="success"] {
+  color: var(--mint);
+}
+
+.auth-session-status[data-state="pending"] {
+  color: var(--gold);
 }
 
 .auth-message[data-state="success"] {
