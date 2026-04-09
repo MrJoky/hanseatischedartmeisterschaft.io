@@ -876,6 +876,22 @@ input {
   padding: 18px;
 }
 
+.match-entry-panel,
+.history-panel {
+  padding: 22px;
+}
+
+.match-form {
+  display: grid;
+  gap: 18px;
+}
+
+.match-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -941,6 +957,55 @@ input {
   cursor: pointer;
 }
 
+.history-list {
+  display: grid;
+  gap: 14px;
+}
+
+.history-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.history-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.history-card-head strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 1rem;
+}
+
+.history-card-head span,
+.history-grid span {
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 16px;
+}
+
+.history-winner {
+  color: var(--gold);
+  font-weight: 700;
+  text-align: right;
+}
+
+.history-remove {
+  justify-self: end;
+}
+
 [data-reveal] {
   opacity: 0;
   transform: translateY(18px) scale(0.985);
@@ -967,7 +1032,10 @@ input {
   .spotlight,
   .admin-card,
   .admin-panel-head,
+  .history-card-head,
   .auth-panel-layout,
+  .match-form-grid,
+  .history-grid,
   .page-hero,
   .bracket-control-grid {
     grid-template-columns: 1fr;

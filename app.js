@@ -19,7 +19,8 @@ import { firebaseConfig } from "./config.js";
 
 const BRACKET_DOC_PATH = ["publicState", "bracket"];
 const EDITOR_ACCESS_COLLECTION = "editorAccess";
-const RANKING_DOC_PATH = ["publicState", "ranking"];
+const MATCH_HISTORY_DOC_PATH = ["publicState", "matchHistory"];
+const MATCH_START_POINTS = 501;
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -972,204 +973,246 @@ function updateBracketMeta(bracket) {
 
 async function initRankingPage() {
   const syncStatus = document.getElementById("syncStatus");
-  const rankingRef = doc(db, ...RANKING_DOC_PATH);
+  const bracketRef = doc(db, ...BRACKET_DOC_PATH);
+  const matchHistoryRef = doc(db, ...MATCH_HISTORY_DOC_PATH);
   const tableBody = document.getElementById("rankingBody");
-  const addRankingRow = document.getElementById("addRankingRow");
-  const importBracketPlayers = document.getElementById("importBracketPlayers");
-  const sortRanking = document.getElementById("sortRanking");
-  const resetRanking = document.getElementById("resetRanking");
-  let state = [];
-  let isApplyingRemote = false;
+  const historyList = document.getElementById("matchHistoryList");
+  const playerOptions = document.getElementById("playerOptions");
+  const matchForm = document.getElementById("matchForm");
+  const matchRound = document.getElementById("matchRound");
+  const matchPlayerA = document.getElementById("matchPlayerA");
+  const matchPlayerB = document.getElementById("matchPlayerB");
+  const matchRemainingA = document.getElementById("matchRemainingA");
+  const matchRemainingB = document.getElementById("matchRemainingB");
+  const matchAverageA = document.getElementById("matchAverageA");
+  const matchAverageB = document.getElementById("matchAverageB");
+  const matchOneEightyA = document.getElementById("matchOneEightyA");
+  const matchOneEightyB = document.getElementById("matchOneEightyB");
+  const matchDecider = document.getElementById("matchDecider");
+  const resetMatches = document.getElementById("resetMatches");
+  const saveMatch = document.getElementById("saveMatch");
+  let bracketNames = [];
+  let matches = [];
   let canEdit = hasEditorAccess();
 
   onEditorAccessChange(() => {
     canEdit = hasEditorAccess();
-    [addRankingRow, importBracketPlayers, sortRanking, resetRanking].forEach((element) => {
+
+    [
+      matchRound,
+      matchPlayerA,
+      matchPlayerB,
+      matchRemainingA,
+      matchRemainingB,
+      matchAverageA,
+      matchAverageB,
+      matchOneEightyA,
+      matchOneEightyB,
+      matchDecider,
+      resetMatches,
+      saveMatch
+    ].forEach((element) => {
       if (element) {
         element.disabled = !canEdit;
       }
     });
-    renderRankingTable();
+
+    updateMatchFormMode();
+    renderAll();
   });
 
   setSyncStatus(syncStatus, "Cloud Sync verbindet...", "pending");
 
-  onSnapshot(rankingRef, async (snapshot) => {
+  onSnapshot(bracketRef, (snapshot) => {
+    bracketNames = snapshot.exists()
+      ? parsePlayers(normalizeBracketState(snapshot.data()?.state).playersText)
+      : [];
+    renderPlayerOptions();
+    renderAll();
+  }, (error) => {
+    console.error(error);
+  });
+
+  onSnapshot(matchHistoryRef, async (snapshot) => {
     if (!snapshot.exists()) {
       if (!canEdit) {
-        state = [];
-        renderRankingTable();
+        matches = [];
+        renderAll();
         setSyncStatus(syncStatus, "Cloud Sync leer. Zum Initialisieren anmelden.", "pending");
         return;
       }
 
       try {
-        await setDoc(rankingRef, createRankingPayload([]), { merge: true });
+        await setDoc(matchHistoryRef, createMatchHistoryPayload([]), { merge: true });
       } catch (error) {
         handleWriteError(error, syncStatus);
       }
       return;
     }
 
-    isApplyingRemote = true;
-    state = normalizeRankingState(snapshot.data()?.state);
-    renderRankingTable();
-    isApplyingRemote = false;
-    setSyncStatus(syncStatus, canEdit ? "Cloud Sync aktiv" : "Cloud Sync aktiv. Nur Lesen.", "live");
+    matches = normalizeMatchHistory(snapshot.data()?.state);
+    renderAll();
+    setSyncStatus(syncStatus, canEdit ? "Match-Historie aktiv" : "Match-Historie aktiv. Nur Lesen.", "live");
   }, (error) => {
     console.error(error);
     setSyncStatus(syncStatus, "Cloud Sync fehlgeschlagen", "error");
   });
 
-  const pushRankingState = debounce(async () => {
-    try {
-      await setDoc(rankingRef, createRankingPayload(state), { merge: true });
-      setSyncStatus(syncStatus, "Gespeichert", "live");
-    } catch (error) {
-      handleWriteError(error, syncStatus);
-    }
-  }, 500);
-
-  addRankingRow?.addEventListener("click", () => {
-    if (!canEdit) {
-      requireEditorAccess(syncStatus);
-      return;
-    }
-
-    state.push(createRankingRow());
-    renderRankingTable();
-    setSyncStatus(syncStatus, "Neuer Spieler wird synchronisiert...", "pending");
-    pushRankingState();
+  matchRound?.addEventListener("change", () => {
+    updateMatchFormMode();
   });
 
-  sortRanking?.addEventListener("click", () => {
-    if (!canEdit) {
-      requireEditorAccess(syncStatus);
-      return;
-    }
+  matchForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
 
-    state = sortRankingRows(state);
-    renderRankingTable();
-    setSyncStatus(syncStatus, "Ranking wird synchronisiert...", "pending");
-    pushRankingState();
-  });
-
-  resetRanking?.addEventListener("click", async () => {
-    if (!canEdit) {
-      requireEditorAccess(syncStatus);
-      return;
-    }
-
-    state = [];
-    renderRankingTable();
-    setSyncStatus(syncStatus, "Leeres Ranking wird gespeichert...", "pending");
-    await pushImmediate(rankingRef, createRankingPayload(state), syncStatus);
-  });
-
-  importBracketPlayers?.addEventListener("click", async () => {
     if (!canEdit) {
       requireEditorAccess(syncStatus);
       return;
     }
 
     try {
-      const bracketSnap = await getDoc(doc(db, ...BRACKET_DOC_PATH));
-      const bracketState = normalizeBracketState(bracketSnap.data()?.state);
-      const bracketNames = parsePlayers(bracketState.playersText);
-      const existingNames = new Set(state.map((row) => row.name.trim().toLowerCase()).filter(Boolean));
-
-      bracketNames.forEach((name) => {
-        if (!existingNames.has(name.toLowerCase())) {
-          state.push(createRankingRow(name));
-        }
+      const nextMatch = createMatchRecord({
+        averageA: matchAverageA?.value,
+        averageB: matchAverageB?.value,
+        decider: matchDecider?.value,
+        oneEightyA: matchOneEightyA?.value,
+        oneEightyB: matchOneEightyB?.value,
+        playerA: matchPlayerA?.value,
+        playerB: matchPlayerB?.value,
+        remainingA: matchRemainingA?.value,
+        remainingB: matchRemainingB?.value,
+        round: matchRound?.value
       });
 
-      renderRankingTable();
-      setSyncStatus(syncStatus, "Spieler werden synchronisiert...", "pending");
-      pushRankingState();
+      const nextMatches = [nextMatch, ...matches];
+      matches = nextMatches;
+      renderAll(nextMatches);
+      setSyncStatus(syncStatus, "Match wird gespeichert...", "pending");
+      await pushImmediate(matchHistoryRef, createMatchHistoryPayload(nextMatches), syncStatus);
+      matchForm.reset();
+      if (matchRound) {
+        matchRound.value = "Freies Spiel";
+      }
+      updateMatchFormMode();
     } catch (error) {
       console.error(error);
-      setSyncStatus(syncStatus, "Import fehlgeschlagen", "error");
+      setSyncStatus(syncStatus, error?.message || "Match konnte nicht gespeichert werden.", "error");
     }
   });
 
-  tableBody?.addEventListener("input", (event) => {
+  resetMatches?.addEventListener("click", async () => {
     if (!canEdit) {
       requireEditorAccess(syncStatus);
       return;
     }
 
-    if (isApplyingRemote) {
-      return;
-    }
-
-    const target = event.target;
-    if (!(target instanceof HTMLInputElement)) {
-      return;
-    }
-
-    const row = state.find((entry) => entry.id === target.dataset.id);
-    if (!row) {
-      return;
-    }
-
-    const field = target.dataset.field;
-    row[field] = target.type === "number" ? normalizeNumericValue(target.value, field === "average") : target.value;
-
-    if (field === "legsFor" || field === "legsAgainst") {
-      updateDiffCell(row.id, state);
-    }
-
-    setSyncStatus(syncStatus, "Änderungen werden synchronisiert...", "pending");
-    pushRankingState();
+    matches = [];
+    renderAll([]);
+    setSyncStatus(syncStatus, "Match-Historie wird geleert...", "pending");
+    await pushImmediate(matchHistoryRef, createMatchHistoryPayload([]), syncStatus);
   });
 
-  tableBody?.addEventListener("click", (event) => {
+  historyList?.addEventListener("click", (event) => {
     if (!canEdit) {
       requireEditorAccess(syncStatus);
       return;
     }
 
-    if (isApplyingRemote) {
-      return;
-    }
-
     const target = event.target;
-    if (!(target instanceof HTMLButtonElement) || !target.dataset.removeId) {
+    if (!(target instanceof HTMLButtonElement) || !target.dataset.removeMatchId) {
       return;
     }
 
-    state = state.filter((entry) => entry.id !== target.dataset.removeId);
-    renderRankingTable();
-    setSyncStatus(syncStatus, "Spieler wird entfernt...", "pending");
-    pushRankingState();
+    const nextMatches = matches.filter((match) => match.id !== target.dataset.removeMatchId);
+    matches = nextMatches;
+    renderAll(nextMatches);
+    setSyncStatus(syncStatus, "Match wird entfernt...", "pending");
+    pushImmediate(matchHistoryRef, createMatchHistoryPayload(nextMatches), syncStatus);
   });
 
-  function renderRankingTable() {
+  function renderAll(nextMatches = matches) {
+    renderPlayerOptions(nextMatches);
+    renderRankingTable(nextMatches);
+    renderMatchHistory(nextMatches);
+  }
+
+  function updateMatchFormMode() {
+    const hasTimeLimit = getRoundTimeLimitMinutes(matchRound?.value) > 0;
+
+    if (matchDecider) {
+      if (!hasTimeLimit) {
+        matchDecider.value = "";
+      }
+
+      matchDecider.disabled = !canEdit || !hasTimeLimit;
+      matchDecider.title = hasTimeLimit
+        ? ""
+        : "Bei Finalrunden ohne Zeitlimit wird kein Entscheidungswurf verwendet.";
+    }
+  }
+
+  updateMatchFormMode();
+
+  function renderPlayerOptions(nextMatches = matches) {
+    if (!playerOptions) {
+      return;
+    }
+
+    const names = collectKnownPlayerNames(nextMatches, bracketNames);
+    playerOptions.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  }
+
+  function renderRankingTable(nextMatches = matches) {
     if (!tableBody) {
       return;
     }
 
-    const disabled = canEdit ? "" : "disabled";
-
-    tableBody.innerHTML = state.map((row, index) => {
-      const diff = Number(row.legsFor) - Number(row.legsAgainst);
+    const rankingRows = computeRankingRows(nextMatches, bracketNames);
+    tableBody.innerHTML = rankingRows.map((row, index) => {
       return `
         <tr>
           <td><span class="rank-pill">${index + 1}</span></td>
-          <td><input class="table-input name" data-id="${row.id}" data-field="name" type="text" value="${escapeHtml(row.name)}" placeholder="Name" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="games" type="number" min="0" value="${row.games}" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="wins" type="number" min="0" value="${row.wins}" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="legsFor" type="number" min="0" value="${row.legsFor}" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="legsAgainst" type="number" min="0" value="${row.legsAgainst}" ${disabled} /></td>
-          <td><span class="diff-pill" data-diff-id="${row.id}">${formatDiff(diff)}</span></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="oneEighty" type="number" min="0" value="${row.oneEighty}" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="average" type="number" step="0.1" min="0" value="${row.average}" ${disabled} /></td>
-          <td><input class="table-input" data-id="${row.id}" data-field="points" type="number" min="0" value="${row.points}" ${disabled} /></td>
-          <td><button class="icon-button" type="button" data-remove-id="${row.id}" aria-label="Spieler entfernen" ${disabled}>×</button></td>
+          <td>${escapeHtml(row.name)}</td>
+          <td>${row.games}</td>
+          <td>${row.wins}</td>
+          <td>${row.pointsFor}</td>
+          <td>${row.pointsAgainst}</td>
+          <td><span class="diff-pill">${formatDiff(row.diff)}</span></td>
+          <td>${row.oneEighty}</td>
+          <td>${formatAverage(row.average)}</td>
+          <td>${row.points}</td>
         </tr>
       `;
     }).join("");
+  }
+
+  function renderMatchHistory(nextMatches = matches) {
+    if (!historyList) {
+      return;
+    }
+
+    historyList.innerHTML = nextMatches.length
+      ? nextMatches.map((match) => `
+          <article class="history-card">
+            <div class="history-card-head">
+              <div>
+                <strong>${escapeHtml(match.playerA)} vs ${escapeHtml(match.playerB)}</strong>
+                <span>${escapeHtml(match.round)} · ${escapeHtml(formatMatchDate(match.createdAt))}</span>
+              </div>
+              <span class="history-winner">${escapeHtml(getWinnerName(match))}</span>
+            </div>
+            <div class="history-grid">
+              <span>Rest: ${match.remainingA} - ${match.remainingB}</span>
+              <span>Runtergespielt: ${getPointsTakenOff(match.remainingA)} - ${getPointsTakenOff(match.remainingB)}</span>
+              <span>Avg: ${formatAverage(match.averageA)} - ${formatAverage(match.averageB)}</span>
+              <span>180er: ${match.oneEightyA} - ${match.oneEightyB}</span>
+              <span>Sieg: ${escapeHtml(getWinTypeLabel(match.winType))}</span>
+              <span>Zeitlimit: ${escapeHtml(formatTimeLimit(match.timeLimitMinutes))}</span>
+            </div>
+            ${canEdit ? `<button class="icon-button history-remove" type="button" data-remove-match-id="${match.id}" aria-label="Match entfernen">×</button>` : ""}
+          </article>
+        `).join("")
+      : `<p class="admin-empty">Noch keine Matches eingetragen.</p>`;
   }
 }
 
@@ -1561,69 +1604,321 @@ function getRandomIndex(max) {
   return Math.floor(Math.random() * max);
 }
 
-function createRankingRow(name = "") {
-  return {
-    id: makeId(),
-    name,
-    games: 0,
-    wins: 0,
-    legsFor: 0,
-    legsAgainst: 0,
-    oneEighty: 0,
-    average: 0,
-    points: 0
-  };
-}
-
-function normalizeRankingState(value) {
+function normalizeMatchHistory(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.map((row) => ({
-    id: String(row?.id || makeId()),
-    name: String(row?.name || ""),
-    games: normalizeNumericValue(row?.games),
-    wins: normalizeNumericValue(row?.wins),
-    legsFor: normalizeNumericValue(row?.legsFor),
-    legsAgainst: normalizeNumericValue(row?.legsAgainst),
-    oneEighty: normalizeNumericValue(row?.oneEighty),
-    average: normalizeNumericValue(row?.average, true),
-    points: normalizeNumericValue(row?.points)
+  return value.map((match) => ({
+    averageA: normalizeNumericValue(match?.averageA, true),
+    averageB: normalizeNumericValue(match?.averageB, true),
+    createdAt: String(match?.createdAt || new Date().toISOString()),
+    id: String(match?.id || makeId()),
+    oneEightyA: normalizeNumericValue(match?.oneEightyA),
+    oneEightyB: normalizeNumericValue(match?.oneEightyB),
+    playerA: String(match?.playerA || "").trim(),
+    playerB: String(match?.playerB || "").trim(),
+    remainingA: clampRemainingPoints(match?.remainingA),
+    remainingB: clampRemainingPoints(match?.remainingB),
+    round: String(match?.round || "Freies Spiel"),
+    timeLimitMinutes: getRoundTimeLimitMinutes(match?.round),
+    winType: normalizeMatchWinType(match),
+    winnerSide: normalizeMatchWinnerSide(match)
   }));
 }
 
-function createRankingPayload(state) {
+function createMatchHistoryPayload(state) {
   return {
-    state: normalizeRankingState(state),
+    state: normalizeMatchHistory(state),
     updatedAt: new Date().toISOString()
   };
 }
 
-function sortRankingRows(rows) {
-  return [...rows].sort((left, right) => {
-    const pointDiff = Number(right.points) - Number(left.points);
-    if (pointDiff !== 0) {
-      return pointDiff;
-    }
+function createMatchRecord(input) {
+  const playerA = String(input.playerA || "").trim();
+  const playerB = String(input.playerB || "").trim();
+  const remainingA = clampRemainingPoints(input.remainingA);
+  const remainingB = clampRemainingPoints(input.remainingB);
+  const averageA = normalizeNumericValue(input.averageA, true);
+  const averageB = normalizeNumericValue(input.averageB, true);
+  const oneEightyA = normalizeNumericValue(input.oneEightyA);
+  const oneEightyB = normalizeNumericValue(input.oneEightyB);
+  const round = String(input.round || "Freies Spiel").trim() || "Freies Spiel";
+  const timeLimitMinutes = getRoundTimeLimitMinutes(round);
+  const decider = input.decider === "b" ? "b" : input.decider === "a" ? "a" : "";
 
-    const diffDelta = (Number(right.legsFor) - Number(right.legsAgainst)) - (Number(left.legsFor) - Number(left.legsAgainst));
-    if (diffDelta !== 0) {
-      return diffDelta;
-    }
-
-    return Number(right.average) - Number(left.average);
-  });
-}
-
-function updateDiffCell(id, state) {
-  const diffElement = document.querySelector(`[data-diff-id="${id}"]`);
-  const row = state.find((entry) => entry.id === id);
-  if (!diffElement || !row) {
-    return;
+  if (!playerA || !playerB) {
+    throw new Error("Bitte zwei Spieler eintragen.");
   }
 
-  diffElement.textContent = formatDiff(Number(row.legsFor) - Number(row.legsAgainst));
+  if (playerA.toLowerCase() === playerB.toLowerCase()) {
+    throw new Error("Ein Match braucht zwei verschiedene Spieler.");
+  }
+
+  if (timeLimitMinutes > 0 && remainingA === remainingB && !decider) {
+    throw new Error("Bei Gleichstand bitte den Entscheidungswurf angeben.");
+  }
+
+  if (timeLimitMinutes === 0 && !isKnockoutWinnerValid(remainingA, remainingB)) {
+    throw new Error("In den Finalrunden ohne Zeitlimit bitte den Sieger mit 0 Restpunkten eintragen.");
+  }
+
+  return {
+    averageA,
+    averageB,
+    createdAt: new Date().toISOString(),
+    id: makeId(),
+    oneEightyA,
+    oneEightyB,
+    playerA,
+    playerB,
+    remainingA,
+    remainingB,
+    round,
+    timeLimitMinutes,
+    winType: getWinType(remainingA, remainingB, decider, timeLimitMinutes),
+    winnerSide: determineWinnerSide(remainingA, remainingB, decider, timeLimitMinutes)
+  };
+}
+
+function computeRankingRows(matches, seedNames = []) {
+  const rows = new Map();
+  const knownNames = collectKnownPlayerNames(matches, seedNames);
+
+  knownNames.forEach((name) => {
+    rows.set(name.toLowerCase(), {
+      average: 0,
+      averageCount: 0,
+      diff: 0,
+      games: 0,
+      name,
+      oneEighty: 0,
+      points: 0,
+      pointsAgainst: 0,
+      pointsFor: 0,
+      wins: 0
+    });
+  });
+
+  matches.forEach((match) => {
+    const keyA = match.playerA.toLowerCase();
+    const keyB = match.playerB.toLowerCase();
+    const rowA = rows.get(keyA) || createComputedPlayerRow(match.playerA);
+    const rowB = rows.get(keyB) || createComputedPlayerRow(match.playerB);
+    const scoredA = getPointsTakenOff(match.remainingA);
+    const scoredB = getPointsTakenOff(match.remainingB);
+
+    rowA.games += 1;
+    rowB.games += 1;
+    rowA.pointsFor += scoredA;
+    rowA.pointsAgainst += scoredB;
+    rowB.pointsFor += scoredB;
+    rowB.pointsAgainst += scoredA;
+    rowA.oneEighty += match.oneEightyA;
+    rowB.oneEighty += match.oneEightyB;
+    rowA.average += match.averageA;
+    rowB.average += match.averageB;
+    rowA.averageCount += 1;
+    rowB.averageCount += 1;
+
+    if (match.winnerSide === "a") {
+      rowA.wins += 1;
+      rowA.points += 2;
+    } else {
+      rowB.wins += 1;
+      rowB.points += 2;
+    }
+
+    rows.set(keyA, rowA);
+    rows.set(keyB, rowB);
+  });
+
+  return [...rows.values()]
+    .map((row) => ({
+      average: row.averageCount ? row.average / row.averageCount : 0,
+      diff: row.pointsFor - row.pointsAgainst,
+      games: row.games,
+      name: row.name,
+      oneEighty: row.oneEighty,
+      points: row.points,
+      pointsAgainst: row.pointsAgainst,
+      pointsFor: row.pointsFor,
+      wins: row.wins
+    }))
+    .sort((left, right) => {
+      const pointDiff = right.points - left.points;
+      if (pointDiff !== 0) {
+        return pointDiff;
+      }
+
+      const diffDelta = right.diff - left.diff;
+      if (diffDelta !== 0) {
+        return diffDelta;
+      }
+
+      const averageDelta = right.average - left.average;
+      if (averageDelta !== 0) {
+        return averageDelta;
+      }
+
+      return left.name.localeCompare(right.name, "de");
+    });
+}
+
+function createComputedPlayerRow(name) {
+  return {
+    average: 0,
+    averageCount: 0,
+    games: 0,
+    name,
+    oneEighty: 0,
+    points: 0,
+    pointsAgainst: 0,
+    pointsFor: 0,
+    wins: 0
+  };
+}
+
+function collectKnownPlayerNames(matches, seedNames = []) {
+  const names = new Set();
+
+  seedNames.forEach((name) => {
+    const cleaned = String(name || "").trim();
+    if (cleaned) {
+      names.add(cleaned);
+    }
+  });
+
+  matches.forEach((match) => {
+    [match.playerA, match.playerB].forEach((name) => {
+      const cleaned = String(name || "").trim();
+      if (cleaned) {
+        names.add(cleaned);
+      }
+    });
+  });
+
+  return [...names].sort((left, right) => left.localeCompare(right, "de"));
+}
+
+function determineWinnerSide(remainingA, remainingB, decider, timeLimitMinutes = 12) {
+  if (timeLimitMinutes === 0) {
+    return remainingA === 0 ? "a" : "b";
+  }
+
+  if (remainingA === remainingB) {
+    return decider === "b" ? "b" : "a";
+  }
+
+  return remainingA < remainingB ? "a" : "b";
+}
+
+function getWinType(remainingA, remainingB, decider, timeLimitMinutes = 12) {
+  if (timeLimitMinutes === 0) {
+    return "checkout";
+  }
+
+  if (remainingA === remainingB) {
+    return "decision_throw";
+  }
+
+  if (remainingA === 0 || remainingB === 0) {
+    return "checkout";
+  }
+
+  return "points";
+}
+
+function getWinTypeLabel(winType) {
+  if (winType === "decision_throw") {
+    return "Entscheidungswurf";
+  }
+
+  if (winType === "checkout") {
+    return "Checkout";
+  }
+
+  return "Mehr runtergespielt";
+}
+
+function getWinnerName(match) {
+  return match.winnerSide === "b" ? match.playerB : match.playerA;
+}
+
+function getRoundTimeLimitMinutes(round) {
+  const normalizedRound = String(round || "").trim().toLowerCase();
+  return ["viertelfinale", "halbfinale", "finale"].includes(normalizedRound) ? 0 : 12;
+}
+
+function isKnockoutWinnerValid(remainingA, remainingB) {
+  return (remainingA === 0 && remainingB > 0) || (remainingB === 0 && remainingA > 0);
+}
+
+function normalizeMatchWinnerSide(match) {
+  const storedWinnerSide = match?.winnerSide === "b" ? "b" : "a";
+  const remainingA = clampRemainingPoints(match?.remainingA);
+  const remainingB = clampRemainingPoints(match?.remainingB);
+  const timeLimitMinutes = getRoundTimeLimitMinutes(match?.round);
+
+  if (timeLimitMinutes === 0 && !isKnockoutWinnerValid(remainingA, remainingB)) {
+    return storedWinnerSide;
+  }
+
+  return determineWinnerSide(
+    remainingA,
+    remainingB,
+    storedWinnerSide,
+    timeLimitMinutes
+  );
+}
+
+function normalizeMatchWinType(match) {
+  const remainingA = clampRemainingPoints(match?.remainingA);
+  const remainingB = clampRemainingPoints(match?.remainingB);
+  const timeLimitMinutes = getRoundTimeLimitMinutes(match?.round);
+
+  if (timeLimitMinutes === 0 && !isKnockoutWinnerValid(remainingA, remainingB)) {
+    return String(match?.winType || "points");
+  }
+
+  return getWinType(
+    remainingA,
+    remainingB,
+    match?.winnerSide === "b" ? "b" : match?.winnerSide === "a" ? "a" : "",
+    timeLimitMinutes
+  );
+}
+
+function formatTimeLimit(value) {
+  const minutes = normalizeNumericValue(value);
+  return minutes > 0 ? `${minutes} Min.` : "Kein Limit";
+}
+
+function getPointsTakenOff(remainingPoints) {
+  return Math.max(0, MATCH_START_POINTS - clampRemainingPoints(remainingPoints));
+}
+
+function clampRemainingPoints(value) {
+  const numeric = normalizeNumericValue(value);
+  return Math.min(MATCH_START_POINTS, Math.max(0, numeric));
+}
+
+function formatAverage(value) {
+  return normalizeNumericValue(value, true).toFixed(1);
+}
+
+function formatMatchDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit"
+  });
 }
 
 function formatDiff(value) {

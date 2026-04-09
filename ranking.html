@@ -26,16 +26,77 @@
             <p class="eyebrow">Hall of Flame</p>
             <h1>Ranking und Stats.</h1>
             <p>
-              Namen und Werte direkt in die Tabelle eintragen und bei Bedarf neu sortieren.
+              Matches eintragen, Historie pflegen und das Ranking automatisch berechnen lassen.
             </p>
             <p class="sync-status" id="syncStatus">Cloud Sync wird verbunden...</p>
           </div>
           <div class="toolbar toolbar-wrap">
-            <button class="button button-primary" id="addRankingRow" type="button">Spieler hinzufügen</button>
-            <button class="button button-secondary" id="importBracketPlayers" type="button">Spieler aus Turnierbaum</button>
-            <button class="button button-secondary" id="sortRanking" type="button">Neu sortieren</button>
-            <button class="button button-secondary" id="resetRanking" type="button">Leeren</button>
+            <button class="button button-secondary" id="resetMatches" type="button">Match-Historie leeren</button>
           </div>
+        </section>
+
+        <section class="panel match-entry-panel" data-reveal>
+          <div class="round-head">
+            <span>Match Eintragen</span>
+            <small>Freies Spiel: 12 Minuten. Viertel-, Halbfinale und Finale ohne Limit.</small>
+          </div>
+          <form class="match-form" id="matchForm">
+            <datalist id="playerOptions"></datalist>
+            <div class="match-form-grid">
+              <label class="auth-field">
+                <span>Runde</span>
+                <select class="auth-input" id="matchRound">
+                  <option value="Freies Spiel">Freies Spiel</option>
+                  <option value="Viertelfinale">Viertelfinale</option>
+                  <option value="Halbfinale">Halbfinale</option>
+                  <option value="Finale">Finale</option>
+                </select>
+              </label>
+              <label class="auth-field">
+                <span>Spieler A</span>
+                <input class="auth-input" id="matchPlayerA" list="playerOptions" placeholder="Kai" required />
+              </label>
+              <label class="auth-field">
+                <span>Spieler B</span>
+                <input class="auth-input" id="matchPlayerB" list="playerOptions" placeholder="Mats" required />
+              </label>
+              <label class="auth-field">
+                <span>Restpunkte A</span>
+                <input class="auth-input" id="matchRemainingA" type="number" min="0" max="501" placeholder="170" required />
+              </label>
+              <label class="auth-field">
+                <span>Restpunkte B</span>
+                <input class="auth-input" id="matchRemainingB" type="number" min="0" max="501" placeholder="92" required />
+              </label>
+              <label class="auth-field">
+                <span>Average A</span>
+                <input class="auth-input" id="matchAverageA" type="number" min="0" step="0.1" placeholder="58.7" required />
+              </label>
+              <label class="auth-field">
+                <span>Average B</span>
+                <input class="auth-input" id="matchAverageB" type="number" min="0" step="0.1" placeholder="61.2" required />
+              </label>
+              <label class="auth-field">
+                <span>180er A</span>
+                <input class="auth-input" id="matchOneEightyA" type="number" min="0" placeholder="0" />
+              </label>
+              <label class="auth-field">
+                <span>180er B</span>
+                <input class="auth-input" id="matchOneEightyB" type="number" min="0" placeholder="0" />
+              </label>
+              <label class="auth-field">
+                <span>Sieger bei Gleichstand</span>
+                <select class="auth-input" id="matchDecider">
+                  <option value="">Nicht benoetigt</option>
+                  <option value="a">Spieler A</option>
+                  <option value="b">Spieler B</option>
+                </select>
+              </label>
+            </div>
+            <div class="toolbar">
+              <button class="button button-primary" id="saveMatch" type="submit">Match speichern</button>
+            </div>
+          </form>
         </section>
 
         <section class="panel table-panel" data-reveal>
@@ -47,18 +108,25 @@
                   <th>Name</th>
                   <th>Spiele</th>
                   <th>Siege</th>
-                  <th>Legs +</th>
-                  <th>Legs -</th>
+                  <th>Punkte +</th>
+                  <th>Punkte -</th>
                   <th>Diff</th>
                   <th>180er</th>
                   <th>Avg</th>
                   <th>Punkte</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="rankingBody"></tbody>
             </table>
           </div>
+        </section>
+
+        <section class="panel history-panel" data-reveal>
+          <div class="round-head">
+            <span>Match Historie</span>
+            <small>Neueste Matches zuerst</small>
+          </div>
+          <div class="history-list" id="matchHistoryList"></div>
         </section>
       </main>
     </div>
